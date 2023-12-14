@@ -1139,7 +1139,7 @@ msgstr ""
 #: templates/profile/export/points.html:6
 #: templates/profile/export/quiz_attempts.html:6
 msgid "app_name"
-msgstr "OppiaMobile"
+msgstr "Noora Academy"
 
 #: templates/base.html:42
 msgid "Cron tasks have not been run for over 7 days"
@@ -1971,7 +1971,7 @@ msgstr ""
 #, python-format
 msgid ""
 "\n"
-"<p>Here is your new password for OppiaMobile: %(new_password)s</p>\n"
+"<p>Here is your new password for Noora Academy: %(new_password)s</p>\n"
 "\n"
 "<p>When you next log in, visit your profile page where you can update your\n"
 "password to something more memorable.</p>\n"
@@ -2049,7 +2049,7 @@ msgstr ""
 
 #: templates/profile/export/activity.html:53
 msgid ""
-"The date/time as recorded by the OppiaMobile server when the activity data "
+"The date/time as recorded by the Noora Academy server when the activity data "
 "was received."
 msgstr ""
 
@@ -2127,7 +2127,7 @@ msgstr ""
 
 #: templates/profile/export/quiz_attempts.html:51
 msgid ""
-"The date/time as recorded by the OppiaMobile server when the quiz attempt "
+"The date/time as recorded by the Noora Academy server when the quiz attempt "
 "data was received."
 msgstr ""
 
@@ -2280,7 +2280,7 @@ msgid "Users in progress:"
 msgstr ""
 
 #: templates/viz/map.html:22
-msgid "OppiaMobile user map"
+msgid "Noora Academy user map"
 msgstr ""
 
 #: templates/viz/summary.html:19
