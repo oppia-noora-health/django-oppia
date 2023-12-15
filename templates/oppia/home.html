@@ -34,12 +34,12 @@
 	{% include "oppia/includes/leaderboard.html" %}
 	<div><a href="{% url 'oppia:leaderboard' %}">{% trans "more..." %}</a></div>
 {% else %}
-    {% static "oppia/images/dc-logo-150x150.png" as oppia_logo %}
+    {% static "oppia/images/noora_logo_color.png" as oppia_logo %}
 
-	<div class="text-center mt-3 mx-auto" style="max-width:350px;">
-		<img src="{{ oppia_logo }}" class="mb-2" alt="OppiaMobile logo"/>
+	<div class="text-center mx-auto" style="text-align:center; max-width:500px; margin:40px">
+		<img src="{{ oppia_logo }}" style="height:130px; margin-bottom:50px" alt="Noora Health logo"/>
 	{% blocktrans %}
-		<p><a href="https://digital-campus.org/oppiamobile/">OppiaMobile</a> is the mobile learning platform from <a href="https://digital-campus.org">Digital Campus</a> to deliver learning content, multimedia and quizzes on your smartphone. All the content and activities can
+		<p>Noora Academy is the mobile learning platform from <a href="https://noorahealth.org">Noora Health</a> to deliver learning content, multimedia and quizzes on your smartphone. All the content and activities can
 	be accessed and used even when you don't have an internet connection available on your mobile.</p>
 	{% endblocktrans %}
 
