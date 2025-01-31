@@ -119,6 +119,7 @@
 		<xs:attribute name="type" type="xs:string" />
 		<xs:attribute name="order" type="xs:positiveInteger" />
 		<xs:attribute name="digest" type="xs:string" />
+		<xs:attribute name="activity_time" type="xs:integer" use="optional"/>
 	</xs:complexType>
 
 	<xs:complexType name="MediaType">

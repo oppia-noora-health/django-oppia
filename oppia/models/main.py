@@ -364,6 +364,7 @@ class Activity(models.Model):
 
     section = models.ForeignKey(Section, on_delete=models.CASCADE)
     order = models.IntegerField(default=0)
+    min_activity_time = models.IntegerField(default=3)
     title = models.TextField(blank=False)
     type = models.CharField(max_length=10)
     digest = models.CharField(max_length=100)
