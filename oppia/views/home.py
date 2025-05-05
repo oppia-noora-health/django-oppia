@@ -11,6 +11,7 @@ from django.http import HttpResponseRedirect
 from django.urls import reverse
 from django.utils import timezone
 from django.views.generic import TemplateView, ListView
+from django.forms.models import model_to_dict
 
 from helpers.forms.dates import DateRangeIntervalForm
 from helpers.mixins.AjaxTemplateResponseMixin import AjaxTemplateResponseMixin
@@ -176,31 +177,64 @@ class TeacherView(TemplateView):
         return context
 
 
+# def get_trackers(start_date, end_date, courses, students=None, date_data='tracker_date'):
+#     activity = []
+#     no_days = (end_date - start_date).days + 1
+#     if date_data == "submitted_date":
+#         trackers = Tracker.objects.filter(course__in=courses,
+#                                           submitted_date__gte=start_date,
+#                                           submitted_date__lte=end_date)
+#     else:
+#         trackers = Tracker.objects.filter(course__in=courses, tracker_date__gte=start_date, tracker_date__lte=end_date)
+
+#     if students:
+#         trackers.filter(user__in=students)
+
+#     trackers.annotate(day=TruncDay(date_data), month=TruncMonth(date_data), year=TruncYear(date_data)) \
+#         .values('day') \
+#         .annotate(count=Count('id'))
+#     for i in range(0, no_days, +1):
+#         temp = start_date + datetime.timedelta(days=i)
+#         temp_date = temp.date().strftime(constants.STR_DATE_DISPLAY_FORMAT)
+#         count = next((dct['count']
+#                      for dct in trackers
+#                      if dct['day'].strftime(constants.STR_DATE_DISPLAY_FORMAT)
+#                      == temp_date), 0)
+#         activity.append([temp.strftime(constants.STR_DATE_DISPLAY_FORMAT),
+#                          count])
+#     return activity
+
 def get_trackers(start_date, end_date, courses, students=None, date_data='tracker_date'):
     activity = []
     no_days = (end_date - start_date).days + 1
+
     if date_data == "submitted_date":
-        trackers = Tracker.objects.filter(course__in=courses,
-                                          submitted_date__gte=start_date,
-                                          submitted_date__lte=end_date)
+        trackers = Tracker.objects.filter(
+            course__in=courses,
+            submitted_date__gte=start_date,
+            submitted_date__lte=end_date)
     else:
-        trackers = Tracker.objects.filter(course__in=courses, tracker_date__gte=start_date, tracker_date__lte=end_date)
+        trackers = Tracker.objects.filter(
+            course__in=courses,
+            tracker_date__gte=start_date,
+            tracker_date__lte=end_date)
 
     if students:
-        trackers.filter(user__in=students)
+        trackers = trackers.filter(user__in=students)
 
-    trackers.annotate(day=TruncDay(date_data), month=TruncMonth(date_data), year=TruncYear(date_data)) \
-        .values('day') \
-        .annotate(count=Count('id'))
+    tracker_data = trackers.annotate(
+        day=TruncDay(date_data),
+        month=TruncMonth(date_data),
+        year=TruncYear(date_data)
+    ).values('day').annotate(count=Count('id'))
+
     for i in range(0, no_days, +1):
         temp = start_date + datetime.timedelta(days=i)
         temp_date = temp.date().strftime(constants.STR_DATE_DISPLAY_FORMAT)
         count = next((dct['count']
-                     for dct in trackers
-                     if dct['day'].strftime(constants.STR_DATE_DISPLAY_FORMAT)
-                     == temp_date), 0)
-        activity.append([temp.strftime(constants.STR_DATE_DISPLAY_FORMAT),
-                         count])
+                      for dct in tracker_data
+                      if dct['day'].strftime(constants.STR_DATE_DISPLAY_FORMAT) == temp_date), 0)
+        activity.append([temp.strftime(constants.STR_DATE_DISPLAY_FORMAT), count])
     return activity
 
 

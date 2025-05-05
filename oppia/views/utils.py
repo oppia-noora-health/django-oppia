@@ -58,27 +58,57 @@ def generate_graph_data(dates_types_stats, is_monthly=False):
     return dates
 
 
-def filter_trackers(trackers, start_date, end_date):
+# def filter_trackers(trackers, start_date, end_date):
 
+#     activity = []
+#     end_date = end_date + datetime.timedelta(days=1)
+#     no_days = (end_date - start_date).days
+
+#     trackers = trackers.filter(
+#                         tracker_date__gte=start_date,
+#                         tracker_date__lte=end_date) \
+#                        .annotate(day=TruncDay('tracker_date'),
+#                                  month=TruncMonth('tracker_date'),
+#                                  year=TruncYear('tracker_date')) \
+#                        .values('day') \
+#                        .annotate(count=Count('id'))
+#     for i in range(0, no_days, +1):
+#         temp = start_date + datetime.timedelta(days=i)
+#         temp_date = temp.date().strftime(constants.STR_DATE_DISPLAY_FORMAT)
+#         count = next((dct['count']
+#                      for dct in trackers
+#                      if dct['day'].strftime(constants.STR_DATE_DISPLAY_FORMAT)
+#                      == temp_date), 0)
+#         activity.append([temp_date, count])
+
+#     return activity
+
+def filter_trackers(trackers, start_date, end_date):
     activity = []
     end_date = end_date + datetime.timedelta(days=1)
     no_days = (end_date - start_date).days
 
-    trackers = trackers.filter(
-                        tracker_date__gte=start_date,
-                        tracker_date__lte=end_date) \
-                       .annotate(day=TruncDay('tracker_date'),
-                                 month=TruncMonth('tracker_date'),
-                                 year=TruncYear('tracker_date')) \
-                       .values('day') \
-                       .annotate(count=Count('id'))
+    tracker_data = trackers.filter(
+        tracker_date__gte=start_date,
+        tracker_date__lte=end_date
+    ).annotate(
+        day=TruncDay('tracker_date'),
+        month=TruncMonth('tracker_date'),
+        year=TruncYear('tracker_date')
+    ).values('day').annotate(count=Count('id'))
+
     for i in range(0, no_days, +1):
         temp = start_date + datetime.timedelta(days=i)
-        temp_date = temp.date().strftime(constants.STR_DATE_DISPLAY_FORMAT)
-        count = next((dct['count']
-                     for dct in trackers
-                     if dct['day'].strftime(constants.STR_DATE_DISPLAY_FORMAT)
-                     == temp_date), 0)
-        activity.append([temp_date, count])
+        temp_date_str = temp.date().strftime(constants.STR_DATE_DISPLAY_FORMAT)
+
+        count = next(
+            (dct['count']
+             for dct in tracker_data
+             if isinstance(dct['day'], (datetime.date, datetime.datetime)) and
+                dct['day'].strftime(constants.STR_DATE_DISPLAY_FORMAT) == temp_date_str),
+            0
+        )
+
+        activity.append([temp_date_str, count])
 
     return activity
