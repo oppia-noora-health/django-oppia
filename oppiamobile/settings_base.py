@@ -178,6 +178,7 @@ LOGIN_EXEMPT_URLS = (
     r'^api/',  # allow any URL under api/* - auth handled by api_key
     r'^media/temp/',
     r'^media/uploaded/',
+    r'^media/certificates/',
     r'^api/activitylog/',
     r'^view/$',
     r'^accounts/password_reset/',

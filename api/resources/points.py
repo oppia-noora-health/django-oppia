@@ -40,6 +40,9 @@ class PointsResource(ModelResource):
             re_path(r"^leaderboard/$",
                     self.wrap_view('leaderboard'),
                     name="api_leaderboard"),
+            re_path(r"^leaderboardcohort/(?P<cohortid>[\d,]+)/$", #changed by namratha
+                    self.wrap_view('cohort_leaderboard'),
+                    name="api_cohort_leaderboard"),
         ]
 
     def leaderboard_all(self, request, **kwargs):
@@ -90,5 +93,55 @@ class PointsResource(ModelResource):
                                                       above=20,
                                                       below=20)
         response_data['leaderboard'] = leaderboard
+
+        return JsonResponse(response_data)
+    
+    #changed by namratha
+    def cohort_leaderboard(self, request, cohortid=None, **kwargs):
+        self.method_check(request, allowed=['get'])
+        self.is_authenticated(request)
+        self.throttle_check(request)
+
+        if request.is_secure():
+            prefix = 'https://'
+        else:
+            prefix = 'http://'
+
+        response_data = {
+            'generated_date': timezone.now(),
+            'server': prefix + request.META['SERVER_NAME'],
+            'cohort_id': cohortid,
+            'leaderboard': []
+        }
+
+        user_map = {}
+
+        cohort_ids = [int(cid) for cid in cohortid.split(',') if cid.isdigit()]
+        for cid in cohort_ids:
+            try:
+                cohort = Cohort.objects.get(pk=cid)
+                leaderboard = cohort.get_leaderboard()
+                for leader in leaderboard:
+                    username = leader.username
+                    if username not in user_map:
+                        user_map[username] = {
+                            'username': username,
+                            'first_name': leader.first_name,
+                            'last_name': leader.last_name,
+                            'points': leader.total,
+                            'badges': leader.badges
+                        }
+                    else:
+                        user_map[username]['points'] += leader.total
+                        user_map[username]['badges'] += leader.badges  
+            except Cohort.DoesNotExist:
+                continue
+
+        # Sort by total points
+        sorted_leaders = sorted(user_map.values(), key=lambda x: x['points'], reverse=True)
+
+        for idx, leader_data in enumerate(sorted_leaders):
+            leader_data['position'] = idx + 1
+            response_data['leaderboard'].append(leader_data)
 
         return JsonResponse(response_data)
