@@ -1,10 +1,12 @@
 import requests
+import re
 from tastypie.resources import Resource
 from tastypie.authorization import Authorization
 from tastypie.authentication import Authentication
 from tastypie.exceptions import BadRequest
 from tastypie.bundle import Bundle
 from django.utils.translation import gettext_lazy as _
+from profile.models import UserProfile #changed by namratha
 
 
 class DummyResponseObject:
@@ -41,18 +43,27 @@ class SendOTPResource(Resource):
             raise BadRequest(_("Missing 'phonenumber' in request."))
 
         try:
-            base_url = self.get_api_base_url(phone_number)
+            # Check if user exists
+            try:
+                user_profile = UserProfile.objects.get(phone_number=phone_number)
+                user = user_profile.user
+            except UserProfile.DoesNotExist:
+                raise BadRequest(_("User does not exist. Please register before logging in."))
+
+            # Proceed only if user exists
+            cleaned_phone_number = re.sub(r"\s+", "", phone_number)
+            base_url = self.get_api_base_url(cleaned_phone_number)
 
             response = requests.post(
                 f'{base_url}/api/v1/academy-auth/start/',
-                json={"number": phone_number, "channel": channel},
+                json={"number": cleaned_phone_number, "channel": channel},
                 headers={"Authorization": "Api-Key jMpk2uHS.5XZLCAjWbvfRXCBKLsICZjFGAAnsKRT8"}
             )
             response.raise_for_status()
             result = response.json()
 
             bundle.data['status'] = 'success'
-            bundle.data['response'] = 'we texted you a login code'
+            bundle.data['response'] = result
 
         except requests.exceptions.RequestException as e:
             raise BadRequest(_(f"OTP sending failed: {str(e)}"))

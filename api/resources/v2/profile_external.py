@@ -9,12 +9,12 @@ from django.utils.translation import gettext_lazy as _
 
 
 class DummyResponseObject:
-    pk = 1  # Dummy pk to prevent Tastypie error
+    pk = 2 # Dummy pk to prevent Tastypie error
 
 
-class ChannelResource(Resource):
+class ProfileExternalResource(Resource):
     class Meta:
-        resource_name = 'channel'
+        resource_name = 'profileexternal'
         object_class = dict  # Non-model resource
         allowed_methods = ['post']
         authentication = Authentication()
@@ -44,17 +44,21 @@ class ChannelResource(Resource):
             base_url = self.get_api_base_url(cleaned_phone_number)
 
             response = requests.get(
-                f'{base_url}/api/v1/academy-auth/channels/',
+                f'{base_url}/api/v1/academy-auth/profile/{cleaned_phone_number}',
                 headers={"Authorization": "Api-Key jMpk2uHS.5XZLCAjWbvfRXCBKLsICZjFGAAnsKRT8"}
             )
             response.raise_for_status()
             result = response.json()
 
+            if not result or 'error' in result or 'detail' in result:
+                raise BadRequest(_("Phone number not found. Please contact your nearest Noora Health team member for assistance."))
+
             bundle.data['status'] = 'success'
-            bundle.data['channels'] = result
+            bundle.data['profile'] = result
+            print(bundle)
 
         except requests.exceptions.RequestException as e:
-            raise BadRequest(_(f"Fetching channels failed: {str(e)}"))
+            raise BadRequest(_("Fetching profile failed: ") + str(e))
         except BadRequest as br:
             raise br
 

@@ -29,3 +29,6 @@ django-filter==23.5
 pycodestyle
 pytest
 pytest-django
+
+#chnaged by namratha
+requests==2.31.0

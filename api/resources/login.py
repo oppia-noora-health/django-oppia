@@ -1,3 +1,5 @@
+import requests
+import re
 
 from django.conf import settings
 from django.contrib.auth import authenticate, login
@@ -16,7 +18,7 @@ from oppia import DEFAULT_IP_ADDRESS
 from oppia.models import Tracker, Participant
 from oppia.models import Points, Award
 
-from profile.models import UserProfile
+from profile.models import UserProfile, CustomField, UserProfileCustomField #update changed by namratha
 
 from settings import constants
 from settings.models import SettingProperties
@@ -125,100 +127,40 @@ class UserResource(ModelResource):
             raise BadRequest(_("Both phone number and OTP are required."))
 
         try:
-            normalized_phone_number = self.normalize_number(phone_number)
+            cleaned_phone_number = re.sub(r"\s+", "", phone_number)
+            base_url = self.get_api_base_url(cleaned_phone_number)
         except BadRequest as e:
             raise e
 
-        # EARLY EXIT if user does not exist
-        try:
-            user_profile = UserProfile.objects.get(phone_number=normalized_phone_number)
-            user = user_profile.user
-        except UserProfile.DoesNotExist:
-            raise BadRequest(_("User does not exist. Please register before logging in."))
-
-        try:
-            base_url = self.get_api_base_url(phone_number)
-        except BadRequest as e:
-            raise e
-
-        # Verify OTP
+        # Step 1: Verify OTP
         try:
             verify_response = requests.post(
                 f'{base_url}/api/v1/academy-auth/verify/',
-                json={"code": otp, "number": phone_number},
+                json={"code": otp, "number": cleaned_phone_number},
                 headers={"Authorization": "Api-Key jMpk2uHS.5XZLCAjWbvfRXCBKLsICZjFGAAnsKRT8"}
             )
             verify_response.raise_for_status()
             otp_verification = verify_response.json()
+
+            # Ensure verification actually passed
+            if otp_verification.get('status') != 'success':
+                raise BadRequest(_("OTP verification failed. Please try again."))
+
         except requests.exceptions.RequestException as e:
             raise BadRequest(_("OTP verification request failed: ") + str(e))
         except ValueError:
             raise BadRequest(_("Invalid JSON response from OTP verification API."))
+        except KeyError:
+            raise BadRequest(_("Unexpected OTP verification response structure."))
 
-        # Get profile
+        # Step 2: OTP success → Proceed to fetch user details
         try:
-            profile_response = requests.get(
-                f"{base_url}/api/v1/academy-auth/profile/{phone_number}",
-                headers={"Authorization": "Api-Key jMpk2uHS.5XZLCAjWbvfRXCBKLsICZjFGAAnsKRT8"}
-            )
-            profile_response.raise_for_status()
-            profile_data = profile_response.json()
-        except requests.exceptions.RequestException:
+            user_profile = UserProfile.objects.get(phone_number=phone_number)
+            user = user_profile.user
+        except UserProfile.DoesNotExist:
             raise BadRequest(_("Phone number not found. Please contact your nearest Noora Health team member for assistance."))
-
-        if not profile_data or 'error' in profile_data or 'detail' in profile_data:
-            raise BadRequest(_("User profile not found or invalid response received from profile API."))
-
-        # Update user.username if changed
-        if user.username != phone_number:
-            user.username = phone_number
-
-        updated = False
-        if user_profile.organisation != profile_data.get('organisation', ''):
-            user_profile.organisation = profile_data.get('organisation', '')
-            updated = True
-        if user_profile.job_title != profile_data.get('job_title', ''):
-            user_profile.job_title = profile_data.get('job_title', '')
-            updated = True
-        if updated:
-            user_profile.save()
-
-        try:
-            custom_fields = CustomField.objects.all()
-            for custom_field in custom_fields:
-                value = profile_data.get(str(custom_field.id))
-                if value is None:
-                    continue
-
-                field_obj, created = UserProfileCustomField.objects.get_or_create(
-                    user=user,
-                    key_name=custom_field
-                )
-
-                if custom_field.type == 'int':
-                    field_obj.value_int = int(value)
-                    field_obj.value_bool = None
-                    field_obj.value_str = None
-                elif custom_field.type == 'bool':
-                    val_bool = value if isinstance(value, bool) else str(value).lower() in ['true', '1', 'yes']
-                    field_obj.value_bool = val_bool
-                    field_obj.value_int = None
-                    field_obj.value_str = None
-                else:
-                    field_obj.value_str = str(value)
-                    field_obj.value_int = None
-                    field_obj.value_bool = None
-
-                field_obj.save()
-
         except Exception as e:
-            raise BadRequest(_("Saving custom fields failed: ") + str(e))
-
-        try:
-            ApiKey.objects.get_or_create(user=user)
-            login(bundle.request, user)
-        except Exception as e:
-            raise BadRequest(_("Login or API key generation failed: ") + str(e))
+            raise BadRequest(_("User lookup failed: ") + str(e))
 
         try:
             Tracker.objects.create(
@@ -230,6 +172,7 @@ class UserResource(ModelResource):
         except Exception as e:
             raise BadRequest(_("Error logging user login tracker: ") + str(e))
 
+        # Custom fields
         custom_fields_data = {}
         user_custom_fields = UserProfileCustomField.objects.filter(user=user)
         for field in user_custom_fields:
@@ -239,23 +182,26 @@ class UserResource(ModelResource):
                 value = field.value_bool
             else:
                 value = field.value_str
-
             custom_fields_data[field.key_name.label] = value
 
+        # Final response
         bundle.data = {
             'username': user.username,
             'first_name': user.first_name,
             'last_name': user.last_name,
             'email': user.email,
             'last_login': user.last_login,
-            'phone_number': user_profile.phone_number if user_profile else '',
-            'organisation': user_profile.organisation if user_profile else '',
-            'job_title': user_profile.job_title if user_profile else '',
+            'phone_number': user_profile.phone_number,
+            'organisation': user_profile.organisation,
+            'job_title': user_profile.job_title,
             'custom_fields': custom_fields_data,
-            'external_api_response': profile_data,
+            'external_api_response': otp_verification,
         }
 
         bundle.obj = user
+        key = ApiKey.objects.get(user=user)
+        bundle.data['api_key'] = key.key
+        print(bundle)
         return bundle
 
     def dehydrate_cohorts(self, bundle):
@@ -292,11 +238,3 @@ class UserResource(ModelResource):
             .values('course__shortname')
             .annotate(total_points=Sum('points')))
         return course_points
-    
-    #changed by namratha
-    def dehydrate_api_key(self, bundle):
-        try:
-            key = ApiKey.objects.get(user=bundle.obj)
-            return key.key
-        except ApiKey.DoesNotExist:
-            return None

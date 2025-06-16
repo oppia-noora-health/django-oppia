@@ -17,6 +17,7 @@ from settings.models import SettingProperties
 from api.utils import check_required_params
 
 from api.resources.base_register import RegisterBaseResource
+from profile.models import UserProfile
 
 
 class RegisterResource(RegisterBaseResource):
@@ -31,8 +32,14 @@ class RegisterResource(RegisterBaseResource):
                     'password',
                     'passwordagain',
                     'first_name',
-                    'last_name']
+                    'last_name',
+                    'phoneno'] #changed by namratha
         check_required_params(bundle, required)
+
+        # changed by namratha
+        phone_number = bundle.data.get('phoneno')
+        if UserProfile.objects.filter(phone_number=phone_number).exists():
+            raise BadRequest(_(u'Phone number "%s" already in use, please select another' % phone_number))
 
         data = {'username': bundle.data['username'],
                 'password': bundle.data['password'],
