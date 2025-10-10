@@ -12,12 +12,14 @@ class LanguageActivityView(BaseReportTemplateView):
         hit_by_language = Tracker.objects \
             .filter(user__is_staff=False, submitted_date__gte=start_date, submitted_date__lte=end_date) \
             .exclude(lang=None) \
+            .exclude(user__in=self.users_filter_by) \
             .values('lang') \
             .annotate(total_hits=Count('id')) \
             .order_by('-total_hits')
         total_hits = Tracker.objects \
             .filter(user__is_staff=False, submitted_date__gte=start_date, submitted_date__lte=end_date) \
             .exclude(lang=None) \
+            .exclude(user__in=self.users_filter_by) \
             .aggregate(total_hits=Count('id'))
 
         i = 0

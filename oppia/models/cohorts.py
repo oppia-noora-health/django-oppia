@@ -104,6 +104,39 @@ class Cohort(models.Model):
         else:
             return 0
 
+    
+    def assign_user_if_matches_criteria(self, user):
+        from profile.models import CustomField
+        from profile.utils import get_customfields_filter
+
+        matched = False
+
+        if not self.criteria_based:
+            return False
+
+        for role in [Participant.STUDENT, Participant.TEACHER]:
+            role_criteria = CohortCritera.objects.filter(cohort=self, role=role)
+            if not role_criteria.exists():
+                continue
+
+            applicable_criteria = 0
+            user_qs = User.objects.filter(id=user.id)
+
+            for criteria in role_criteria:
+                customfield = CustomField.objects.filter(id=criteria.user_profile_field).first()
+                if not customfield:
+                    continue
+                user_qs = user_qs.filter(get_customfields_filter(criteria.user_profile_value, customfield))
+                applicable_criteria += 1
+
+            if applicable_criteria > 0 and user_qs.exists():
+                if not Participant.objects.filter(cohort=self, user=user, role=role).exists():
+                    Participant.objects.create(cohort=self, user=user, role=role)
+                    matched = True
+
+        return matched
+
+
 
 class CourseCohort(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE)

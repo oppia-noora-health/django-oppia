@@ -16,6 +16,7 @@ class CompletionRatesView(TemplateView):
     def get(self, request):
 
         courses = Course.objects.filter(CourseFilter.IS_NOT_ARCHIVED & CourseFilter.IS_NOT_DRAFT).order_by('title')
+        excluded_user_ids = UserCourseSummary.get_excluded_users().values_list('id', flat=True) 
 
         courses_list = []
 
@@ -24,6 +25,7 @@ class CompletionRatesView(TemplateView):
             obj['course'] = course
             course_stats = UserCourseSummary.objects \
                 .filter(course=course) \
+                .exclude(user__in=excluded_user_ids) \
                 .values('course') \
                 .annotate(users=Count('user'),
                           completed=Sum('badges_achieved'))

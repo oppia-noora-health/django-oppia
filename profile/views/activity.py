@@ -41,15 +41,26 @@ class UserScorecardDetails(CanViewUserDetailsMixin, DateRangeFilterMixin, Detail
         courses = []
         for course in all_courses:
             course.can_view_course_activity = can_view_course_activity(self.request, course.id)
-            courses.append(UserCourseSummary.objects.get_stats_summary(self.object, course))
+
+            course_stats = UserCourseSummary.objects.get_stats_summary(self.object, course)
+
+            # Add sections completed info (exclude baseline sections)
+            total_sections = course.get_no_sections()  # custom method that excludes baseline
+            sections_completed = Course.get_sections_completed(course, self.object)
+
+            course_stats['sections_completed'] = sections_completed
+            course_stats['total_sections'] = total_sections  # For displaying as "x/y"
+
+            courses.append(course_stats)
 
         order_options = ['course_display',
-                         'no_quizzes_completed',
-                         'pretest_score',
-                         'no_activities_completed',
-                         'no_points',
-                         'no_badges',
-                         'no_media_viewed']
+                        'no_quizzes_completed',
+                        'pretest_score',
+                        'no_activities_completed',
+                        'no_points',
+                        'no_badges',
+                        'no_media_viewed',
+                        'sections_completed']
         default_order = 'course_display'
 
         ordering = self.request.GET.get('order_by', default_order)
@@ -73,6 +84,7 @@ class UserScorecardDetails(CanViewUserDetailsMixin, DateRangeFilterMixin, Detail
         context['page_ordering'] = ('-' if inverse_order else '') + ordering
         context['activity_graph_data'] = activity
         return context
+
 
 
 @method_decorator(permission_view_course, name='dispatch')

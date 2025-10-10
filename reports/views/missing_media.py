@@ -7,15 +7,22 @@ from django.utils.decorators import method_decorator
 from django.views.generic import TemplateView
 
 from oppia.models import Tracker
+from django.db.models import Q
 
 
 @method_decorator(staff_member_required, name='dispatch')
 class MissingMediaView(TemplateView):
 
     def get(self, request):
-        users = Tracker.objects.filter(
-            event="media_missing").values('user').distinct()
+        # Exclude staff, superusers, and users marked to be excluded from reporting
+        excluded_users = User.objects.filter(
+            Q(is_staff=True) | Q(is_superuser=True) | Q(userprofile__exclude_from_reporting=True)
+        ).values_list('pk', flat=True)
 
+        users = Tracker.objects.filter(
+            event="media_missing"
+        ).exclude(user__in=excluded_users).values('user').distinct()
+        
         user_data = []
         for user in users:
             ud = {}

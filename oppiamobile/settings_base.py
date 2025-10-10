@@ -260,3 +260,42 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.JSONParser',
     ]
 }
+
+#for Noora Health Authorization Key
+STAGING_NOORA_API_KEY = 'jMpk2uHS.5XZLCAjWbvfRXCBKLsICZjFGAAnsKRT8'
+
+NOORA_API_KEY_INDIA = 'wE3odGfc.r1qJNVwfh6RFX8nbp8ZnHiaVHxjJDe1u'
+
+NOORA_API_KEY_INDONESIA = '0LP9OTX5.aUJMicXkAshMRH9v65BPYUeDGZ8NKeq8'
+
+NOORA_API_KEY_BANGLADESH = 'WxSzGsfH.N1uZNyw7Sh0tUjS1FTIpzk6c20NflmVv'
+
+NOORA_API_KEY_NEPAL = 'yjiuxY4E.kAiEZL6ot8944LRJ2zfxjm6Bma06dERs'
+
+#url for India hep
+STAGING_INDIA_URL = 'https://staging.noorahealth.org/hep'
+PROD_INDIA_URL = 'https://india.hep.noorahealth.org/hep'
+
+#url for Indonesia hep
+STAGING_INDONESIA_URL = 'https://staging-indo.noorahealth.org/hep'
+PROD_INDONESIA_URL = 'https://indo.hep.noorahealth.org/hep'
+
+#url for Nepal np
+STAGING_NEPAL_URL = 'https://staging.noorahealth.org/np'
+PROD_NEPAL_URL = 'https://nepal.hep.noorahealth.org/hep'
+
+#url for Bangladesh bd
+STAGING_BANGLADESH_URL = 'https://staging.noorahealth.org/bd'
+PROD_BANGLADESH_URL = 'https://bd.hep.noorahealth.org/bd'
+
+#profile url
+PROFILE_URL = '/api/v1/academy-auth/profile/'
+
+#verify url
+VERIFY_URL = '/api/v1/academy-auth/verify/'
+
+#channel url
+CHANNEL_URL = '/api/v1/academy-auth/channels/'
+
+#auth url
+AUTH_URL = '/api/v1/academy-auth/start/'

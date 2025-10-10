@@ -17,11 +17,14 @@ from api.serializers import UserJSONSerializer
 from oppia import DEFAULT_IP_ADDRESS
 from oppia.models import Tracker, Participant
 from oppia.models import Points, Award
+from oppia.models import Cohort
 
 from profile.models import UserProfile, CustomField, UserProfileCustomField #update changed by namratha
 
 from settings import constants
 from settings.models import SettingProperties
+
+from django.conf import settings
 
 
 class UserResource(ModelResource):
@@ -56,24 +59,28 @@ class UserResource(ModelResource):
     #changed by namratha
     def get_api_base_url(self, phone_number):
         if phone_number.startswith('+91'):
-            return 'https://staging.noorahealth.org/hep'
+            return settings.PROD_INDIA_URL
         elif phone_number.startswith('+62'):
-            return 'https://staging-indo.noorahealth.org/hep'
-        elif phone_number.startswith('+880'):
-            return 'https://staging.noorahealth.org/bd'
+            return settings.PROD_INDONESIA_URL
         elif phone_number.startswith('+977'):
-            return 'https://staging.noorahealth.org/np'
+            return settings.PROD_NEPAL_URL
+        elif phone_number.startswith('+880'):
+            return settings.PROD_BANGLADESH_URL
         else:
             raise BadRequest(_("Unsupported country code in phone number."))
     
-    #changed by namratha
-    @staticmethod
-    def normalize_number(number):
-        match = re.match(r'^(\+\d{2})(\d{10})$', number.replace(" ", ""))
-        if not match:
-            raise BadRequest(_("Invalid phone number format."))
-        return f"{match.group(1)} {match.group(2)}"
-
+    def get_api_key(self, phone_number):
+        if phone_number.startswith('+91'):
+            return settings.NOORA_API_KEY_INDIA
+        elif phone_number.startswith('+62'):
+            return settings.NOORA_API_KEY_INDONESIA
+        elif phone_number.startswith('+977'):
+            return settings.NOORA_API_KEY_NEPAL
+        elif phone_number.startswith('+880'):
+            return settings.NOORA_API_KEY_BANGLADESH
+        else:
+            raise BadRequest(_("Unsupported country code in phone number."))
+    
     # def obj_create(self, bundle, **kwargs):
 
     #     if 'username' not in bundle.data:
@@ -123,21 +130,28 @@ class UserResource(ModelResource):
         phone_number = bundle.data.get('phone_number')
         otp = bundle.data.get('code')
 
-        if not phone_number or not otp:
-            raise BadRequest(_("Both phone number and OTP are required."))
+        missing = []
+        if not phone_number:
+            missing.append("phone_number")
+        if not otp:
+            missing.append("otp")
+
+        if missing:
+            raise BadRequest(_(f"Missing fields in request: {', '.join(missing)}."))
 
         try:
-            cleaned_phone_number = re.sub(r"\s+", "", phone_number)
+            cleaned_phone_number = re.sub(r"(?!^\+)[^\d]", "", phone_number)
             base_url = self.get_api_base_url(cleaned_phone_number)
+            noora_api_key = self.get_api_key(cleaned_phone_number)
         except BadRequest as e:
             raise e
 
         # Step 1: Verify OTP
         try:
             verify_response = requests.post(
-                f'{base_url}/api/v1/academy-auth/verify/',
+                f'{base_url}{settings.VERIFY_URL}',
                 json={"code": otp, "number": cleaned_phone_number},
-                headers={"Authorization": "Api-Key jMpk2uHS.5XZLCAjWbvfRXCBKLsICZjFGAAnsKRT8"}
+                headers={"Authorization": f"Api-Key {noora_api_key}"} 
             )
             verify_response.raise_for_status()
             otp_verification = verify_response.json()
@@ -147,7 +161,7 @@ class UserResource(ModelResource):
                 raise BadRequest(_("OTP verification failed. Please try again."))
 
         except requests.exceptions.RequestException as e:
-            raise BadRequest(_("OTP verification request failed: ") + str(e))
+            raise BadRequest(_("OTP verification request failed "))
         except ValueError:
             raise BadRequest(_("Invalid JSON response from OTP verification API."))
         except KeyError:
@@ -160,18 +174,19 @@ class UserResource(ModelResource):
         except UserProfile.DoesNotExist:
             raise BadRequest(_("Phone number not found. Please contact your nearest Noora Health team member for assistance."))
         except Exception as e:
-            raise BadRequest(_("User lookup failed: ") + str(e))
+            raise BadRequest(_("User lookup failed "))
 
         try:
-            Tracker.objects.create(
-                user=user,
-                type='login',
-                ip=bundle.request.META.get('REMOTE_ADDR', DEFAULT_IP_ADDRESS),
-                agent=bundle.request.META.get('HTTP_USER_AGENT', 'unknown')
-            )
+            Tracker.objects.create(user=user,type='login',ip=bundle.request.META.get('REMOTE_ADDR', DEFAULT_IP_ADDRESS),agent=bundle.request.META.get('HTTP_USER_AGENT', 'unknown'))
         except Exception as e:
-            raise BadRequest(_("Error logging user login tracker: ") + str(e))
+            raise BadRequest(_("Error logging user login tracker "))
 
+        login(bundle.request, user)
+
+        # assiging user to the cohort based on the custom field criteria
+        for cohort in Cohort.objects.filter(criteria_based=True):
+            cohort.assign_user_if_matches_criteria(user)
+            
         # Custom fields
         custom_fields_data = {}
         user_custom_fields = UserProfileCustomField.objects.filter(user=user)
@@ -199,9 +214,8 @@ class UserResource(ModelResource):
         }
 
         bundle.obj = user
-        key = ApiKey.objects.get(user=user)
-        bundle.data['api_key'] = key.key
-        print(bundle)
+        key=ApiKey.objects.get(user=user)
+        bundle.data['api_key']=key.key
         return bundle
 
     def dehydrate_cohorts(self, bundle):

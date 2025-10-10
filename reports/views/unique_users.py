@@ -10,6 +10,8 @@ from profile.models import UserProfileCustomField
 
 from reports.forms import ReportGroupByForm
 
+from summary.models import UserCourseSummary
+
 
 @method_decorator(staff_member_required, name='dispatch')
 class UniqueUsersView(TemplateView):
@@ -24,10 +26,12 @@ class UniqueUsersView(TemplateView):
     def post(self, request):
         user_list = []
         group_by_form = ReportGroupByForm(request.POST)
+        excluded_user_ids = UserCourseSummary.get_excluded_users().values_list('id', flat=True) 
         if group_by_form.is_valid():
             group_by = group_by_form.cleaned_data.get("group_by")
             user_list = UserProfileCustomField.objects \
                 .filter(key_name=group_by) \
+                .exclude(user__in=excluded_user_ids) \
                 .values('value_str') \
                 .annotate(total=Count('value_str')) \
                 .order_by('value_str')

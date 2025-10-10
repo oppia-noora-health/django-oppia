@@ -51,8 +51,9 @@ class Command(BaseCommand):
                 .write('{path} does not exist. Don\'t need to clean it'
                        .format(path=path))
 
-        from oppia.awards import courses_completed
+        from oppia.awards import courses_completed, percent_completion_badge
         courses_completed(int(hours))
+        percent_completion_badge(int(hours))
 
         # generate pdf certificates
         call_command('generate_certificates')

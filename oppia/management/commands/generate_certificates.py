@@ -6,7 +6,7 @@ from django.db.models import Q
 from django.utils.translation import gettext as _
 
 from oppia import emailer
-from oppia.models import Award, CertificateTemplate, Course
+from oppia.models import Award, CertificateTemplate, Course, Badge
 from oppia.badges.certificates import generate_certificate_pdf
 
 from settings import constants
@@ -38,13 +38,22 @@ class Command(BaseCommand):
 
         cert_templates = CertificateTemplate.objects.filter(enabled=True)
 
+        # Get the course completion badge (with ref='coursecompleted')
+        try:
+            course_completion_badge = Badge.objects.get(ref='coursecompleted')
+        except Badge.DoesNotExist:
+            self.stdout.write("Course completion badge with ref='coursecompleted' not found.")
+            return
+
         # find the awards that haven't had certs generated
         for ct in cert_templates:
-            awards = Award.objects.filter(awardcourse__course=ct.course)
+
+            awards = Award.objects.filter(awardcourse__course=ct.course, badge=course_completion_badge)
 
             if not options['allcerts'] and not options['user']:
                 awards = awards.filter(
                      Q(certificate_pdf__isnull=True) | Q(certificate_pdf=""))
+                
             elif options['user']:
                 try:
                     user = User.objects.get(pk=options['user'])
@@ -55,6 +64,7 @@ class Command(BaseCommand):
 
             for award in awards:
                 result = self.create_certificate(ct, award)
+                print(result)
 
                 # Email certificate if enabled
                 if result and SettingProperties.get_bool(

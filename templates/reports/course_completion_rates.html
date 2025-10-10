@@ -2,65 +2,157 @@
 {% load i18n %}
 {% load display_functions %}
 {% load crispy_forms_tags %}
+{% load static %}
 
 {% block extra_head_title %}
-	{{ course.title|title_lang:LANGUAGE_CODE }}
+    {{ course.title|title_lang:LANGUAGE_CODE }}
 {% endblock extra_head_title %}
 
 {% block header %}
 <div class="jumbotron mb-4">
-	<h3><a href="{% url 'oppia:recent_activity' course.id %}">{{ course.title|title_lang:LANGUAGE_CODE }}</a> <em class="material-icons md-18 ">arrow_forward_ios</em> {% trans 'Completion Rates' %}</h3>
-    <p><em>{% trans 'Categories:' %} {{ course.get_categories}}</em></p>
+    <h3>
+        <a href="{% url 'oppia:recent_activity' course.id %}">{{ course.title|title_lang:LANGUAGE_CODE }}</a>
+        <em class="material-icons md-18">arrow_forward_ios</em>
+        {% trans 'Completion Rates' %}
+    </h3>
+    <p><em>{% trans 'Categories:' %} {{ course.get_categories }}</em></p>
 </div>
 {% endblock header %}
 
-
 {% block content %}
-
-	
 <h3>{% trans 'Course completion rates' %}</h3>
-<p>{% trans 'Users enroled:' %} {{ users_enroled_count }}</p>
+<p>{% trans 'Users enrolled:' %} {{ users_enroled_count }}</p>
 
 <div class="table-responsive">
-     <table class="table table-striped">
-     	 <caption class="d-none">{% trans "Course completiong rates" %}</caption>
-         <thead>
+    <table class="table table-striped">
+        <caption class="d-none">{% trans "Course completion rates" %}</caption>
+        <thead>
             <tr>
-              <th scope="col">{% trans 'User' %}</th>
-              <th scope="col">{% trans 'Activities completed' %}</th>
+                <th>{% trans 'User' %}</th>
+                <th>{% trans 'Pretest Score' %}</th>
+                <th>{% trans 'Activities Completed' %}</th>
+                <th>{% trans 'Percentage of Activities Completed (%)' %}</th>
+                <th>{% trans 'Modules Completed (%)' %}</th>
+                <th>{% trans 'Quizzes Completed (%)' %}</th>
+                <th>{% trans 'Media Viewed (%)' %}</th>
+                <th>{% trans 'Posttest Score' %}</th>
+                <th>{% trans 'Posttest Score - Pretest Score' %}</th>
+                <th>{% trans 'Points' %}</th>
+                <th>{% trans 'Badges' %}</th>
             </tr>
-          </thead>
-          <tbody>
-          {% if users_completed %}
-          <tr>
-              <th colspan="2" scope="col">{% trans 'Users completed:' %} {{ users_completed|length }}</th>
-          </tr>
-          {% endif %}
-    {% for u in users_completed %}
-         <tr>
-              <td>
-                {% if OPPIA_SHOW_GRAVATARS %}{{ u.user|gravatar:24 }} {% endif %}
-                <a href="{% url 'profile:user_activity' u.user.id %}">{{ u.user.first_name }} {{ u.user.last_name }}</a>
-              </td>
-         <td>
-            <span> {{ u.activities_completed }} ({{ u.completion_percent|floatformat:2 }}%)</span></td>
-            </tr>
-    {% endfor %}
-         {% if users_incompleted %}
-        <tr>
-              <th colspan="2" scope="col">{% trans 'Users in progress:' %} {{ users_incompleted|length }}</th>
-          </tr>
-          {% endif %}
-    {% for u in users_incompleted %}
-        <tr>
-          <td>
-            {% if OPPIA_SHOW_GRAVATARS %} {{ u.user|gravatar:24 }} {% endif %}
-            <a href="{% url 'profile:user_activity' u.user.id %}">{{ u.user.first_name }} {{ u.user.last_name }}</a>
-          </td>
-          <td>{{ u.activities_completed }} ({{ u.completion_percent|floatformat:2 }}%)</td>
-        </tr>
-    {% endfor %}
+        </thead>
+        <tbody>
+            {% if users_completed %}
+                <tr><th colspan="8">{% trans 'Users completed:' %} {{ users_completed|length }}</th></tr>
+                {% for u in users_completed %}
+                    <tr>
+                        <td>
+                            {% if OPPIA_SHOW_GRAVATARS %}{{ u.user|gravatar:24 }} {% endif %}
+                            <a href="{% url 'profile:user_activity' u.user.id %}">
+                                {{ u.user.first_name }} {{ u.user.last_name }}
+                            </a>
+                        </td>
+                        <td>{{ u.pretest_score }}</td>
+                        <td>{{ u.activities_completed }}/{{ u.total_activities }} </td>
+                        <td>{{ u.completion_percent|floatformat:2 }}%</td>
+                        <td>{{ u.sections_completed }}/{{ u.total_sections }} ({{ u.section_completion_percent|floatformat:2 }}%)</td>
+                        <td>{{ u.quizzes_completed }}/{{ u.total_quizzes }} ({{ u.quiz_completion_percent|floatformat:2 }}%)</td>
+                        <td>{{ u.medias_viewed }}/{{ u.total_medias }} ({{ u.media_viewed_percent|floatformat:2 }}%)</td>
+                        <td>{{ u.posttest_score }}</td>
+                        <td>{{ u.score_difference }}</td>
+                        <td>{{ u.points }}</td>
+                        <td>
+                            {% if u.badges|default:0 > 0 %}
+                                <span class="badges" title="{% trans 'Badge' %}">
+                                    <img src="{% static "oppia/images/badge.png" %}" alt="{% trans 'Badge' %}" style="height:16px; vertical-align:middle;" />
+                                </span>
+                                x  {{ u.badges }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            {% endif %}
+
+            {% if users_incompleted %}
+                <tr><th colspan="8">{% trans 'Users in progress:' %} {{ users_incompleted|length }}</th></tr>
+                {% for u in users_incompleted %}
+                    <tr>
+                        <td>
+                            {% if OPPIA_SHOW_GRAVATARS %}{{ u.user|gravatar:24 }} {% endif %}
+                            <a href="{% url 'profile:user_activity' u.user.id %}">
+                                {{ u.user.first_name }} {{ u.user.last_name }}
+                            </a>
+                        </td>
+                        <td>{{ u.pretest_score }}</td>
+                        <td>{{ u.activities_completed }}/{{ u.total_activities }} </td>
+                        <td>{{ u.completion_percent|floatformat:2 }}%</td>
+                        <td>{{ u.sections_completed }}/{{ u.total_sections }} ({{ u.section_completion_percent|floatformat:2 }}%)</td>
+                        <td>{{ u.quizzes_completed }}/{{ u.total_quizzes }} ({{ u.quiz_completion_percent|floatformat:2 }}%)</td>
+                        <td>{{ u.medias_viewed }}/{{ u.total_medias }} ({{ u.media_viewed_percent|floatformat:2 }}%)</td>
+                        <td>{{ u.posttest_score }}</td>
+                        <td>{{ u.score_difference }}</td>
+                        <td>{{ u.points }}</td>
+                        <td>
+                            {% if u.badges|default:0 > 0 %}
+                                <span class="badges" title="{% trans 'Badge' %}">
+                                    <img src="{% static "oppia/images/badge.png" %}" alt="{% trans 'Badge' %}" style="height:16px; vertical-align:middle;" />
+                                </span>
+                                x  {{ u.badges }}
+                            {% endif %} 
+                        </td>
+                    </tr>
+                {% endfor %}
+            {% endif %}
         </tbody>
     </table>
 </div>
-{% endblock  %}
+
+{% if users_enroled_count > 0 %}
+    <button class="btn btn-default btn-primary btn-sm download-csv-button" data-csv="completion_rates_data">
+        {% trans "Download as CSV" %}
+    </button>
+{% endif %}
+{% endblock content %}
+
+{% block extra_scripts %}
+<script src="{% static "oppia/js/oppia.chart-utils.js" %}"></script>
+<script src="https://www.gstatic.com/charts/loader.js"></script>
+
+<script>
+    var dsets = {};
+    google.charts.load('current', { packages: [] });
+
+    google.charts.setOnLoadCallback(function() {
+        dsets['completion_rates_data'] = new google.visualization.DataTable();
+        dsets['completion_rates_data'].addColumn('string', "{% trans 'User' %}");
+        dsets['completion_rates_data'].addColumn('number', "{% trans 'Pretest Score' %}");
+        dsets['completion_rates_data'].addColumn('string', "{% trans 'Activities Completed' %}");
+        dsets['completion_rates_data'].addColumn('string', "{% trans 'Percentage of Activities Completed (%)' %}");
+        dsets['completion_rates_data'].addColumn('string', "{% trans 'Modules Completed (%)' %}");
+        dsets['completion_rates_data'].addColumn('string', "{% trans 'Quizzes Completed (%)' %}");
+        dsets['completion_rates_data'].addColumn('string', "{% trans 'Media Viewed (%)' %}");
+        dsets['completion_rates_data'].addColumn('number', "{% trans 'Posttest Score' %}");
+        dsets['completion_rates_data'].addColumn('number', "{% trans 'Posttest Score - Pretest Score' %}");
+        dsets['completion_rates_data'].addColumn('number', "{% trans 'Points' %}");
+        dsets['completion_rates_data'].addColumn('number', "{% trans 'Badges' %}");
+
+        {% for u in all_users %}
+            dsets['completion_rates_data'].addRow([
+                "{{ u.user.first_name }} {{ u.user.last_name }}",
+                {{ u.pretest_score|default:0 }},
+                "{{ u.activities_completed }}/{{ u.total_activities }}",
+                "{{ u.completion_percent|floatformat:2 }}%",
+                "{{ u.sections_completed }}/{{ u.total_sections }} ({{ u.section_completion_percent|floatformat:2 }}%)",
+                "{{ u.quizzes_completed }}/{{ u.total_quizzes }} ({{ u.quiz_completion_percent|floatformat:2 }}%)",
+                "{{ u.medias_viewed }}/{{ u.total_medias }} ({{ u.media_viewed_percent|floatformat:2 }}%)",
+                {{ u.posttest_score|default:0 }},
+                {{ u.score_difference|default:0 }},
+                {{ u.points }},
+                {{ u.badges }}
+            ]);
+        {% endfor %}
+    });
+
+    {% include 'reports/includes/csv_export_button.html' %}
+</script>
+{% endblock %}

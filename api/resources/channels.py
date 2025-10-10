@@ -7,6 +7,7 @@ from tastypie.exceptions import BadRequest
 from tastypie.bundle import Bundle
 from django.utils.translation import gettext_lazy as _
 
+from django.conf import settings
 
 class DummyResponseObject:
     pk = 1  # Dummy pk to prevent Tastypie error
@@ -23,13 +24,25 @@ class ChannelResource(Resource):
 
     def get_api_base_url(self, phone_number):
         if phone_number.startswith('+91'):
-            return 'https://staging.noorahealth.org/hep'
+            return settings.PROD_INDIA_URL
         elif phone_number.startswith('+62'):
-            return 'https://staging-indo.noorahealth.org/hep'
-        elif phone_number.startswith('+880'):
-            return 'https://staging.noorahealth.org/bd'
+            return settings.PROD_INDONESIA_URL
         elif phone_number.startswith('+977'):
-            return 'https://staging.noorahealth.org/np'
+            return settings.PROD_NEPAL_URL
+        elif phone_number.startswith('+880'):
+            return settings.PROD_BANGLADESH_URL
+        else:
+            raise BadRequest(_("Unsupported country code in phone number."))
+    
+    def get_api_key(self, phone_number):
+        if phone_number.startswith('+91'):
+            return settings.NOORA_API_KEY_INDIA
+        elif phone_number.startswith('+62'):
+            return settings.NOORA_API_KEY_INDONESIA
+        elif phone_number.startswith('+977'):
+            return settings.NOORA_API_KEY_NEPAL
+        elif phone_number.startswith('+880'):
+            return settings.NOORA_API_KEY_BANGLADESH
         else:
             raise BadRequest(_("Unsupported country code in phone number."))
 
@@ -40,12 +53,13 @@ class ChannelResource(Resource):
             raise BadRequest(_("Missing 'phone_number' in request."))
 
         try:
-            cleaned_phone_number = re.sub(r"\s+", "", phone_number)
+            cleaned_phone_number = re.sub(r"(?!^\+)[^\d]", "", phone_number)
             base_url = self.get_api_base_url(cleaned_phone_number)
+            noora_api_key = self.get_api_key(cleaned_phone_number)
 
             response = requests.get(
-                f'{base_url}/api/v1/academy-auth/channels/',
-                headers={"Authorization": "Api-Key jMpk2uHS.5XZLCAjWbvfRXCBKLsICZjFGAAnsKRT8"}
+                f'{base_url}{settings.CHANNEL_URL}',
+                headers={"Authorization": f"Api-Key {noora_api_key}"} 
             )
             response.raise_for_status()
             result = response.json()
@@ -54,7 +68,7 @@ class ChannelResource(Resource):
             bundle.data['channels'] = result
 
         except requests.exceptions.RequestException as e:
-            raise BadRequest(_(f"Fetching channels failed: {str(e)}"))
+            raise BadRequest(_(f"Fetching channels failed"))
         except BadRequest as br:
             raise br
 

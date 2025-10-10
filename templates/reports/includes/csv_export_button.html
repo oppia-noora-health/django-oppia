@@ -3,7 +3,7 @@ $(function(){
         var dataset_name = $(this).attr('data-csv');
         if (dsets[dataset_name]){
             var csvContent = getCSVFromDatatable(dsets[dataset_name]);
-            downloadFile(csvContent, dataset_name+'.xls', 'text/csv');
+            downloadFile(csvContent, dataset_name+'.csv', 'text/csv');
         }
     });
 });

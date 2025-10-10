@@ -165,6 +165,14 @@ class Course(models.Model):
     def sections(self):
         sections = Section.objects.filter(course=self).order_by('order')
         return sections
+    
+    def get_no_sections(self):
+        sections = Section.objects.filter(course=self)
+        count = 0
+        for section in sections:
+            if Activity.objects.filter(section=section, baseline=False).exists():
+                count += 1
+        return count
 
     def get_no_activities(self):
         return Activity.objects.filter(section__course=self,
@@ -254,6 +262,46 @@ class Course(models.Model):
             return None
 
     @staticmethod
+    def get_post_test_score(course, user):
+        try:
+            # Get the last section by order
+            last_section = course.section_set.order_by('-order').first()
+            if not last_section:
+                return None
+
+            # Get all quiz activities in the last section
+            quizzes_activities = Activity.objects.filter(section=last_section, type=Activity.QUIZ)
+            if not quizzes_activities.exists():
+                return None
+
+            # Collect all digests for quizzes
+            digests = quizzes_activities.values_list('digest', flat=True)
+
+            # Get all quizzes matching those digests
+            quizzes = Quiz.objects.filter(quizprops__value__in=digests,
+                                        quizprops__name=QuizProps.DIGEST)
+        except Quiz.DoesNotExist:
+            return None
+
+        attempts = QuizAttempt.objects.filter(quiz__in=quizzes, user=user)
+        if attempts.exists():
+            max_score = 100 * float(attempts.aggregate(max=Max('score'))['max']) \
+                        / float(attempts[0].maxscore)
+            return max_score
+        else:
+            return None
+    
+    @staticmethod
+    def get_score_difference(course, user):
+        pre_score = Course.get_pre_test_score(course, user)
+        post_score = Course.get_post_test_score(course, user)
+
+        if pre_score is None or post_score is None:
+            return None
+
+        return post_score - pre_score
+
+    @staticmethod
     def get_no_quizzes_completed(course, user):
         acts = Activity.objects.filter(section__course=course, baseline=False, type=Activity.QUIZ).values_list('digest')
         quizzes = Quiz.objects.filter(quizprops__value__in=acts, quizprops__name=QuizProps.DIGEST)
@@ -271,6 +319,32 @@ class Course(models.Model):
             .values_list('digest') \
             .distinct() \
             .count()
+    
+    @staticmethod
+    def get_sections_completed(course, user):
+        completed_sections = 0
+        sections = Section.objects.filter(course=course)
+
+        for section in sections:
+            activities = Activity.objects.filter(section=section, baseline=False)
+
+            if not activities.exists():
+                continue  # No activities in this section
+
+            activity_digests = list(activities.values_list('digest', flat=True))
+
+            completed_digests = Tracker.objects.filter(
+                course=course,
+                user=user,
+                completed=True,
+                digest__in=activity_digests
+            ).values_list('digest', flat=True)
+
+            if set(activity_digests).issubset(set(completed_digests)):
+                completed_sections += 1
+
+        return completed_sections
+
 
     @staticmethod
     def get_media_viewed(course, user):

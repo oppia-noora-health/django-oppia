@@ -27,7 +27,7 @@ from api.resources.download_data import DownloadDataResource
 from quiz.api.resources import QuizAttemptResource
 from api.resources.send_otp import SendOTPResource #changed by namratha
 from api.resources.channels import ChannelResource #changed by namratha
-from api.resources.v2.profile_external import ProfileExternalResource#changed by namratha
+from api.resources.v2.external_profile import ExternalProfileResource#changed by namratha
 
 
 # warnings.warn("API v2 will be removed in v0.16.0", DeprecationWarning, stacklevel=2)
@@ -56,7 +56,7 @@ def get_api_v2():
     api.register(UserProfileResource())
     api.register(SendOTPResource()) #changed by namratha
     api.register(ChannelResource()) #changed by namratha
-    api.register(ProfileExternalResource())#changed by namratha
+    api.register(ExternalProfileResource())#changed by namratha
     return api
 
 

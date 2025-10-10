@@ -1,5 +1,6 @@
 from django.http import JsonResponse
 from django.urls.conf import re_path
+from django.shortcuts import get_object_or_404
 
 from tastypie.authentication import ApiKeyAuthentication
 from tastypie.authorization import ReadOnlyAuthorization
@@ -8,8 +9,7 @@ from tastypie.utils import timezone
 
 from api.serializers import PrettyJSONSerializer
 
-from oppia.models import Points
-
+from oppia.models import Points, Cohort
 
 class PointsResource(ModelResource):
     class Meta:

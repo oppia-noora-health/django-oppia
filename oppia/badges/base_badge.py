@@ -32,3 +32,17 @@ class BaseBadge():
         ac.award = award
         ac.course_version = course.version
         ac.save()
+
+    def award_progress_badge(self, course, user, badge, percent):
+        """Award badge based on activity completion milestones."""
+        award = Award()
+        award.badge = badge
+        award.user = user
+        award.description = f"Awarded '{badge.description}' for completing {int(percent)}% of course: {course.get_title()}"
+        award.save()
+
+        ac = AwardCourse()
+        ac.course = course
+        ac.award = award
+        ac.course_version = course.version
+        ac.save()
