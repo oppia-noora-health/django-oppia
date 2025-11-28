@@ -10,6 +10,8 @@ from django.urls import reverse
 from django.utils.translation import gettext as _
 from django.views.generic import FormView, TemplateView, ListView
 from tastypie.models import ApiKey
+from django.db.models import Q
+from django.core.paginator import Paginator
 
 import profile
 from helpers.ajax import is_ajax
@@ -75,7 +77,6 @@ class UserList(StaffRequiredMixin, ExportAsCSVMixin, SafePaginatorMixin, ListVie
         context['page_ordering'] = self.request.GET.get('order_by', self.default_order)
         return context
 
-
 class AddUserView(StaffRequiredMixin, TitleViewMixin, FormView):
 
     template_name = STR_COMMON_FORM
@@ -114,13 +115,31 @@ def export_users(request):
 
 @staff_member_required
 def list_users(request):
-    ordering, users = utils.get_paginated_users(request)
-    return render(request, 'profile/users-paginated-list.html',
-                  {'page_obj': users,
-                   'object_list': users.object_list,
-                   'page_ordering': ordering,
-                   'users_list_template': 'select',
-                   'ajax_url': request.path})
+    q = request.GET.get("q", "").strip()
+
+    # If search is empty, return empty queryset
+    if not q:
+        users = User.objects.none()
+    else:
+        # Filter users by search query
+        users = User.objects.filter(
+            Q(first_name__icontains=q) |
+            Q(last_name__icontains=q) |
+            Q(username__icontains=q) |
+            Q(email__icontains=q)
+        )
+
+    # Pagination (even if empty)
+    paginator = Paginator(users, 15)
+    page = paginator.get_page(request.GET.get("page"))
+
+    return render(request, 'profile/users-paginated-list.html', {
+        'page_obj': page,
+        'object_list': page.object_list,
+        'page_ordering': "username",
+        'users_list_template': 'select',
+        'ajax_url': request.path
+    })
 
 
 def delete_user_data(delete_user):

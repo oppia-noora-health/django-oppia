@@ -85,6 +85,19 @@ class UserProfile(models.Model):
 
         return profile_fields
 
+    def get_facility(self):
+        try:
+            facility_field = CustomField.objects.get(id='facility')  # custom field ID
+            return UserProfileCustomField.get_user_value(self.user, facility_field)
+        except CustomField.DoesNotExist:
+            return None
+
+    def get_designation(self):
+        try:
+            designation_field = CustomField.objects.get(id='designation')  # custom field ID
+            return UserProfileCustomField.get_user_value(self.user, designation_field)
+        except CustomField.DoesNotExist:
+            return None
 
 class CustomField(models.Model):
 

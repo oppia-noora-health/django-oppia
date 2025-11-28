@@ -101,9 +101,18 @@
 
 
      <div class="col-sm-6" id="add-teachers-block" style="display:none;">
-     <h4>{% trans 'Available teachers' %}</h4>
+        <div class="form-group row">
+            <div class="col-sm-8">
+                <input type="text" id="search-teachers-input" class="form-control"
+                       placeholder="Search teachers">
+            </div>
+            <div class="col-sm-4">
+                <button class="btn btn-primary" id="search-teachers-btn">Search</button>
+            </div>
+        </div>
+        <h4>{% trans 'Available teachers' %}</h4>
          <div id="available-teachers" class="available-items">
-         {% include "profile/users-paginated-list.html"  with object_list=page.object_list page_obj=page ajax_url=users_list_url %}
+         {% include "profile/users-paginated-list.html"  with object_list=page.object_list page_obj=page ajax_url=users_list_url users_list_template="select" %}
          </div>
     </div>
 </div>
@@ -154,9 +163,75 @@
 
 
      <div class="col-sm-6" id="add-students-block" style="display:none;">
-     <h4>{% trans 'Available students' %}</h4>
+        <div class="form-group row">
+            <div class="col-sm-8">
+                <input type="text" id="search-students-input" class="form-control"
+                       placeholder="Search students">
+            </div>
+            <div class="col-sm-4">
+                <button class="btn btn-primary" id="search-students-btn">Search</button>
+            </div>
+        </div>
+        <h4>{% trans 'Available students' %}</h4>
          <div id="available-students" class="available-items">
-         {% include "profile/users-paginated-list.html" with object_list=page.object_list page_obj=page ajax_url=users_list_url %}
+         {% include "profile/users-paginated-list.html" with object_list=page.object_list page_obj=page ajax_url=users_list_url users_list_template="select" %}
          </div>
     </div>
 </div>
+
+<script>
+    $(document).ready(function() {
+        
+        // AJAX search
+        function loadUserSearchResults(inputId, targetDiv, url) {
+            let searchValue = document.getElementById(inputId).value;
+
+            fetch(url + "?q=" + encodeURIComponent(searchValue), {
+                headers: { "X-Requested-With": "XMLHttpRequest" }
+            })
+            .then(r => r.text())
+            .then(html => {
+                // Only replace innerHTML of available-users container
+                document.getElementById(targetDiv).innerHTML = html;
+
+                // Re-bind pagination links
+                bindAjaxPagination(targetDiv, url);
+
+                // Re-apply selectable behavior to the new content
+                applyAllSelectable();
+            });
+        }
+
+        function bindAjaxPagination(targetDiv, url) {
+            document.querySelectorAll("#" + targetDiv + " .pagination a").forEach(link => {
+                link.onclick = function(e) {
+                    e.preventDefault();
+                    fetch(this.href, {
+                        headers: { "X-Requested-With": "XMLHttpRequest" }
+                    })
+                    .then(r => r.text())
+                    .then(html => {
+                        document.getElementById(targetDiv).innerHTML = html;
+                        bindAjaxPagination(targetDiv, url);
+                        applyAllSelectable();
+                    });
+                };
+            });
+        }
+
+        // Bind search buttons
+        $("#search-teachers-btn").click(function(e){
+            e.preventDefault();
+            loadUserSearchResults("search-teachers-input", "available-teachers", "{{ users_list_url }}");
+        });
+
+        $("#search-students-btn").click(function(e){
+            e.preventDefault();
+            loadUserSearchResults("search-students-input", "available-students", "{{ users_list_url }}");
+        });
+        });
+
+</script>
+    
+    
+

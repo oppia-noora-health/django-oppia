@@ -31,6 +31,7 @@ class CourseCompletionRatesView(TemplateView):
             .filter(course=course_id).order_by('user')
 
         for user_stats in users_stats:
+            profile = getattr(user_stats.user, 'userprofile', None)
             user_activities = user_stats.completed_activities
             sections_completed = Course.get_sections_completed(course, user_stats.user) or 0
             user_quizzes = user_stats.quizzes_passed or 0
@@ -43,6 +44,8 @@ class CourseCompletionRatesView(TemplateView):
 
             user_obj = {
                 'user': user_stats.user,
+                'facility': profile.get_facility() if profile else None,
+                'designation': profile.get_designation() if profile else None,
                 'pretest_score': pretest_score,
 
                 'activities_completed': user_activities,

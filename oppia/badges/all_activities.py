@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from oppia.badges.base_badge import BaseBadge
 from oppia.models import Tracker, Activity
+from oppia.models import Course
 
 
 class BadgeAllActivities(BaseBadge):
@@ -20,13 +21,18 @@ class BadgeAllActivities(BaseBadge):
         # 'hours'
         if hours == 0:
             users = User.objects.filter(tracker__course=course)
+            
         else:
             since = timezone.now() - datetime.timedelta(hours=int(hours))
             users = User.objects.filter(tracker__course=course,
                                         tracker__submitted_date__gte=since)
 
         # exclude the users that already own this course award
-        users = users.exclude(award__awardcourse__course=course).distinct()
+        # users = users.exclude(award__awardcourse__course=course).distinct()
+        users = users.exclude(
+            award__badge=badge,           # exclude this badge
+            award__awardcourse__course=course  # only for this course
+        ).distinct()
 
         for user in users:
             user_completed = Tracker.objects.filter(user=user,

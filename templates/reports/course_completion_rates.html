@@ -23,12 +23,63 @@
 <h3>{% trans 'Course completion rates' %}</h3>
 <p>{% trans 'Users enrolled:' %} {{ users_enroled_count }}</p>
 
+<!-- Column selector -->
+<div class="mb-3 p-3 border rounded bg-light">
+    <strong>Select Columns to Display:</strong>
+    <div class="row mt-2">
+        <div class="col-md-12">
+
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="0" checked> User
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="1"> Facility
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="2"> Designation
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="3" checked> Pretest Score
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="4" checked> Activities Completed
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="5" checked> Percentage Completed
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="6" checked> Modules Completed
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="7" checked> Quizzes Completed
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="8" checked> Media Viewed
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="9" checked> Posttest Score
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="10" checked> Score Diff
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="11"> Points
+            </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="12"> Badges
+            </label>
+        </div>
+    </div>
+</div>
+
 <div class="table-responsive">
     <table class="table table-striped">
         <caption class="d-none">{% trans "Course completion rates" %}</caption>
         <thead>
             <tr>
                 <th>{% trans 'User' %}</th>
+                <th>{% trans 'Facility' %}</th>
+                <th>{% trans 'Designation' %}</th>
                 <th>{% trans 'Pretest Score' %}</th>
                 <th>{% trans 'Activities Completed' %}</th>
                 <th>{% trans 'Percentage of Activities Completed (%)' %}</th>
@@ -52,6 +103,8 @@
                                 {{ u.user.first_name }} {{ u.user.last_name }}
                             </a>
                         </td>
+                        <td>{{ u.facility }}</td>
+                        <td>{{ u.designation }}</td>
                         <td>{{ u.pretest_score }}</td>
                         <td>{{ u.activities_completed }}/{{ u.total_activities }} </td>
                         <td>{{ u.completion_percent|floatformat:2 }}%</td>
@@ -83,6 +136,8 @@
                                 {{ u.user.first_name }} {{ u.user.last_name }}
                             </a>
                         </td>
+                        <td>{{ u.facility }}</td>
+                        <td>{{ u.designation }}</td>
                         <td>{{ u.pretest_score }}</td>
                         <td>{{ u.activities_completed }}/{{ u.total_activities }} </td>
                         <td>{{ u.completion_percent|floatformat:2 }}%</td>
@@ -118,6 +173,40 @@
 <script src="{% static "oppia/js/oppia.chart-utils.js" %}"></script>
 <script src="https://www.gstatic.com/charts/loader.js"></script>
 
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+
+        const table = document.querySelector("table.table");
+
+        // Hide unchecked columns on first load
+        document.querySelectorAll(".col-toggle").forEach(function (checkbox) {
+            const colIndex = parseInt(checkbox.getAttribute("data-col"));
+            if (!checkbox.checked) {
+                table.querySelectorAll("tr").forEach(function (row) {
+                    const cell = row.children[colIndex];
+                    if (cell) cell.style.display = "none";
+                });
+            }
+        });
+
+        // Handle live show/hide
+        document.querySelectorAll(".col-toggle").forEach(function (checkbox) {
+            checkbox.addEventListener("change", function () {
+                const colIndex = parseInt(this.getAttribute("data-col"));
+                const show = this.checked;
+
+                table.querySelectorAll("tr").forEach(function (row) {
+                    const cell = row.children[colIndex];
+                    if (cell) cell.style.display = show ? "" : "none";
+                });
+            });
+        });
+
+    });
+
+</script>
+
 <script>
     var dsets = {};
     google.charts.load('current', { packages: [] });
@@ -125,6 +214,8 @@
     google.charts.setOnLoadCallback(function() {
         dsets['completion_rates_data'] = new google.visualization.DataTable();
         dsets['completion_rates_data'].addColumn('string', "{% trans 'User' %}");
+        dsets['completion_rates_data'].addColumn('string', "{% trans 'Facility' %}");
+        dsets['completion_rates_data'].addColumn('string', "{% trans 'Designation' %}");
         dsets['completion_rates_data'].addColumn('number', "{% trans 'Pretest Score' %}");
         dsets['completion_rates_data'].addColumn('string', "{% trans 'Activities Completed' %}");
         dsets['completion_rates_data'].addColumn('string', "{% trans 'Percentage of Activities Completed (%)' %}");
@@ -136,20 +227,24 @@
         dsets['completion_rates_data'].addColumn('number', "{% trans 'Points' %}");
         dsets['completion_rates_data'].addColumn('number', "{% trans 'Badges' %}");
 
+
         {% for u in all_users %}
             dsets['completion_rates_data'].addRow([
-                "{{ u.user.first_name }} {{ u.user.last_name }}",
-                {{ u.pretest_score|default:0 }},
+                "\"{{ u.user.first_name|escapejs }} {{ u.user.last_name|escapejs }}\"",
+                "\"{{ u.facility|default:''|escapejs }}\"",
+                "\"{{ u.designation|default:''|escapejs }}\"",
+                Number({{ u.pretest_score|default:0 }}),
                 "{{ u.activities_completed }}/{{ u.total_activities }}",
                 "{{ u.completion_percent|floatformat:2 }}%",
                 "{{ u.sections_completed }}/{{ u.total_sections }} ({{ u.section_completion_percent|floatformat:2 }}%)",
                 "{{ u.quizzes_completed }}/{{ u.total_quizzes }} ({{ u.quiz_completion_percent|floatformat:2 }}%)",
                 "{{ u.medias_viewed }}/{{ u.total_medias }} ({{ u.media_viewed_percent|floatformat:2 }}%)",
-                {{ u.posttest_score|default:0 }},
-                {{ u.score_difference|default:0 }},
-                {{ u.points }},
-                {{ u.badges }}
+                Number({{ u.posttest_score|default:0 }}),
+                Number({{ u.score_difference|default:0 }}),
+                Number({{ u.points|default:0 }}),
+                Number({{ u.badges|default:0 }})
             ]);
+
         {% endfor %}
     });
 
