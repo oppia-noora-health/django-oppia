@@ -135,7 +135,7 @@ class ExternalProfileResource(RegisterBaseResource):
 
         if user_profile:
             user = user_profile.user
-            set_exclude_from_reporting(user)
+            # set_exclude_from_reporting(user) added it in staging server for testing purpose
             # Compare and update User fields
             updated = False
             first_name = external_profile.get('first_name', '').strip()
@@ -195,7 +195,7 @@ class ExternalProfileResource(RegisterBaseResource):
             self.process_register_base_profile(bundle)
             self.process_register_custom_fields(bundle)
             self.insert_country_language_custom_fields(user, country, language)
-            set_exclude_from_reporting(user)
+            # set_exclude_from_reporting(user) added it in staging server for testing purpose
 
             # Track registration
             Tracker.objects.create(

@@ -197,8 +197,7 @@
                 // Re-bind pagination links
                 bindAjaxPagination(targetDiv, url);
 
-                // Re-apply selectable behavior to the new content
-                applyAllSelectable();
+                applySelectableBehaviour($("#" + targetDiv).closest(".selectable-group"));
             });
         }
 
@@ -213,7 +212,7 @@
                     .then(html => {
                         document.getElementById(targetDiv).innerHTML = html;
                         bindAjaxPagination(targetDiv, url);
-                        applyAllSelectable();
+                        applySelectableBehaviour($("#" + targetDiv).closest(".selectable-group"));
                     });
                 };
             });

@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import zipfile
+import io  
 
 import xmltodict
 from django.conf import settings
@@ -254,11 +255,17 @@ class CourseStructureResource(ModelResource):
         return return_obj
 
     def dehydrate(self, bundle):
-        path = os.path.join(settings.MEDIA_ROOT,
-                            'courses',
-                            bundle.obj.shortname,
-                            'module.xml')
-        with open(path) as fd:
+        path = os.path.join(
+            settings.MEDIA_ROOT,
+            'courses',
+            bundle.obj.shortname,
+            'module.xml'
+        )
+
+        # Read XML as UTF-8 (fixes ascii decode error)
+        with io.open(path, 'r', encoding='utf-8') as fd:
             doc = xmltodict.parse(fd.read())
-        bundle.data['structure'] = json.dumps(doc)
+
+        # Preserve Unicode characters in JSON
+        bundle.data['structure'] = json.dumps(doc, ensure_ascii=False)
         return bundle

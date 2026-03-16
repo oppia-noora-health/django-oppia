@@ -4,8 +4,9 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect,HttpResponse
 from django.shortcuts import render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.translation import gettext as _
 from django.views.generic import FormView, TemplateView, ListView
@@ -117,9 +118,8 @@ def export_users(request):
 def list_users(request):
     q = request.GET.get("q", "").strip()
 
-    # If search is empty, return empty queryset
     if not q:
-        users = User.objects.none()
+        users = User.objects.all()
     else:
         # Filter users by search query
         users = User.objects.filter(
@@ -130,13 +130,12 @@ def list_users(request):
         )
 
     # Pagination (even if empty)
-    paginator = Paginator(users, 15)
-    page = paginator.get_page(request.GET.get("page"))
+    ordering, paginated_users = utils.get_paginated_users_list(request,users)
 
     return render(request, 'profile/users-paginated-list.html', {
-        'page_obj': page,
-        'object_list': page.object_list,
-        'page_ordering': "username",
+        'page_obj': paginated_users,
+        'object_list': paginated_users.object_list,
+        'page_ordering': ordering,
         'users_list_template': 'select',
         'ajax_url': request.path
     })

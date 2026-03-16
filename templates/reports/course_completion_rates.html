@@ -9,6 +9,18 @@
 {% endblock extra_head_title %}
 
 {% block header %}
+<style>
+    th.sortable {
+        cursor: pointer;
+        user-select: none;
+    }
+    
+    .sort-indicator {
+        font-size: 0.8em;
+        margin-left: 4px;
+        opacity: 0.6;
+    }
+</style>
 <div class="jumbotron mb-4">
     <h3>
         <a href="{% url 'oppia:recent_activity' course.id %}">{{ course.title|title_lang:LANGUAGE_CODE }}</a>
@@ -21,6 +33,24 @@
 
 {% block content %}
 <h3>{% trans 'Course completion rates' %}</h3>
+<!-- Cohort Filter -->
+<form method="get" class="mb-3">
+    <label><strong>Filter by Cohort:</strong></label>
+    <select name="cohort" class="form-control" style="max-width: 200px; display: inline-block;"
+            onchange="this.form.submit()">
+
+        <option value="" {% if not selected_cohort %}selected{% endif %}>
+            All Users
+        </option>
+
+        {% for cc in course_cohorts %}
+            <option value="{{ cc.cohort.id }}"
+                {% if selected_cohort and selected_cohort.id == cc.cohort.id %}selected{% endif %}>
+                {{ cc.cohort.description }}
+            </option>
+        {% endfor %}
+    </select>
+</form>
 <p>{% trans 'Users enrolled:' %} {{ users_enroled_count }}</p>
 
 <!-- Column selector -->
@@ -68,33 +98,69 @@
             <label class="mr-3">
                 <input type="checkbox" class="col-toggle" data-col="12"> Badges
             </label>
+            <label class="mr-3">
+                <input type="checkbox" class="col-toggle" data-col="13" checked> Completed At
+            </label>
         </div>
     </div>
 </div>
 
 <div class="table-responsive">
-    <table class="table table-striped">
+    <table id="completionTable" class="table table-striped">
         <caption class="d-none">{% trans "Course completion rates" %}</caption>
         <thead>
             <tr>
-                <th>{% trans 'User' %}</th>
-                <th>{% trans 'Facility' %}</th>
-                <th>{% trans 'Designation' %}</th>
-                <th>{% trans 'Pretest Score' %}</th>
-                <th>{% trans 'Activities Completed' %}</th>
-                <th>{% trans 'Percentage of Activities Completed (%)' %}</th>
-                <th>{% trans 'Modules Completed (%)' %}</th>
-                <th>{% trans 'Quizzes Completed (%)' %}</th>
-                <th>{% trans 'Media Viewed (%)' %}</th>
-                <th>{% trans 'Posttest Score' %}</th>
-                <th>{% trans 'Posttest Score - Pretest Score' %}</th>
-                <th>{% trans 'Points' %}</th>
-                <th>{% trans 'Badges' %}</th>
+                <th class="sortable" data-sort-col="0">
+                    User <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="1">
+                    Facility <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="2">
+                    Designation <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="3">
+                    Pretest Score <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="4">
+                    Activities Completed <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="5">
+                    Percentage Completed <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="6">
+                    Modules Completed <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="7">
+                    Quizzes Completed <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="8">
+                    Media Viewed <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="9">
+                    Posttest Score <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="10">
+                    Score Diff <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="11">
+                    Points <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="12">
+                    Badges <span class="sort-indicator"></span>
+                </th>
+                <th class="sortable" data-sort-col="13">
+                    Completed At <span class="sort-indicator"></span>
+                </th>
             </tr>
         </thead>
         <tbody>
             {% if users_completed %}
-                <tr><th colspan="8">{% trans 'Users completed:' %} {{ users_completed|length }}</th></tr>
+                <tr class="completed-header">
+                    <th colspan="14">
+                        {% trans 'Users completed:' %} {{ users_completed|length }}
+                    </th>
+                </tr>
                 {% for u in users_completed %}
                     <tr>
                         <td>
@@ -103,31 +169,71 @@
                                 {{ u.user.first_name }} {{ u.user.last_name }}
                             </a>
                         </td>
+                    
                         <td>{{ u.facility }}</td>
                         <td>{{ u.designation }}</td>
-                        <td>{{ u.pretest_score }}</td>
-                        <td>{{ u.activities_completed }}/{{ u.total_activities }} </td>
-                        <td>{{ u.completion_percent|floatformat:2 }}%</td>
-                        <td>{{ u.sections_completed }}/{{ u.total_sections }} ({{ u.section_completion_percent|floatformat:2 }}%)</td>
-                        <td>{{ u.quizzes_completed }}/{{ u.total_quizzes }} ({{ u.quiz_completion_percent|floatformat:2 }}%)</td>
-                        <td>{{ u.medias_viewed }}/{{ u.total_medias }} ({{ u.media_viewed_percent|floatformat:2 }}%)</td>
-                        <td>{{ u.posttest_score }}</td>
-                        <td>{{ u.score_difference }}</td>
-                        <td>{{ u.points }}</td>
-                        <td>
+                    
+                        <td data-sort="{{ u.pretest_score|default:0 }}">
+                            {{ u.pretest_score }}
+                        </td>
+                    
+                        <td data-sort="{{ u.activities_completed }}">
+                            {{ u.activities_completed }}/{{ u.total_activities }}
+                        </td>
+                    
+                        <td data-sort="{{ u.completion_percent }}">
+                            {{ u.completion_percent|floatformat:2 }}%
+                        </td>
+                    
+                        <td data-sort="{{ u.section_completion_percent }}">
+                            {{ u.sections_completed }}/{{ u.total_sections }}
+                            ({{ u.section_completion_percent|floatformat:2 }}%)
+                        </td>
+                    
+                        <td data-sort="{{ u.quiz_completion_percent }}">
+                            {{ u.quizzes_completed }}/{{ u.total_quizzes }}
+                            ({{ u.quiz_completion_percent|floatformat:2 }}%)
+                        </td>
+                    
+                        <td data-sort="{{ u.medias_viewed|default:0 }}">
+                            {{ u.medias_viewed|default:0 }}
+                        </td>
+                    
+                        <td data-sort="{{ u.posttest_score|default:0 }}">
+                            {{ u.posttest_score }}
+                        </td>
+                    
+                        <td data-sort="{{ u.score_difference|default:0 }}">
+                            {{ u.score_difference }}
+                        </td>
+                    
+                        <td data-sort="{{ u.points|default:0 }}">
+                            {{ u.points }}
+                        </td>
+                    
+                        <td data-sort="{{ u.badges|default:0 }}">
                             {% if u.badges|default:0 > 0 %}
-                                <span class="badges" title="{% trans 'Badge' %}">
-                                    <img src="{% static "oppia/images/badge.png" %}" alt="{% trans 'Badge' %}" style="height:16px; vertical-align:middle;" />
+                                <span class="badges">
+                                    <img src="{% static 'oppia/images/badge.png' %}" style="height:16px;" />
                                 </span>
-                                x  {{ u.badges }}
+                                x {{ u.badges }}
                             {% endif %}
                         </td>
+                    
+                        <td data-sort="{{ u.completed_at|date:'Y-m-d H:i:s' }}">
+                            {{ u.completed_at|date:"Y-m-d H:i:s" }}
+                        </td>
                     </tr>
+                
                 {% endfor %}
             {% endif %}
 
             {% if users_incompleted %}
-                <tr><th colspan="8">{% trans 'Users in progress:' %} {{ users_incompleted|length }}</th></tr>
+                <tr class="incompleted-header">
+                    <th colspan="14">
+                        {% trans 'Users in progress:' %} {{ users_incompleted|length }}
+                    </th>
+                </tr>
                 {% for u in users_incompleted %}
                     <tr>
                         <td>
@@ -136,25 +242,56 @@
                                 {{ u.user.first_name }} {{ u.user.last_name }}
                             </a>
                         </td>
+                    
                         <td>{{ u.facility }}</td>
                         <td>{{ u.designation }}</td>
-                        <td>{{ u.pretest_score }}</td>
-                        <td>{{ u.activities_completed }}/{{ u.total_activities }} </td>
-                        <td>{{ u.completion_percent|floatformat:2 }}%</td>
-                        <td>{{ u.sections_completed }}/{{ u.total_sections }} ({{ u.section_completion_percent|floatformat:2 }}%)</td>
-                        <td>{{ u.quizzes_completed }}/{{ u.total_quizzes }} ({{ u.quiz_completion_percent|floatformat:2 }}%)</td>
-                        <td>{{ u.medias_viewed }}/{{ u.total_medias }} ({{ u.media_viewed_percent|floatformat:2 }}%)</td>
-                        <td>{{ u.posttest_score }}</td>
-                        <td>{{ u.score_difference }}</td>
-                        <td>{{ u.points }}</td>
-                        <td>
-                            {% if u.badges|default:0 > 0 %}
-                                <span class="badges" title="{% trans 'Badge' %}">
-                                    <img src="{% static "oppia/images/badge.png" %}" alt="{% trans 'Badge' %}" style="height:16px; vertical-align:middle;" />
-                                </span>
-                                x  {{ u.badges }}
-                            {% endif %} 
+                    
+                        <td data-sort="{{ u.pretest_score|default:0 }}">
+                            {{ u.pretest_score }}
                         </td>
+                    
+                        <td data-sort="{{ u.activities_completed }}">
+                            {{ u.activities_completed }}/{{ u.total_activities }}
+                        </td>
+                    
+                        <td data-sort="{{ u.completion_percent }}">
+                            {{ u.completion_percent|floatformat:2 }}%
+                        </td>
+                    
+                        <td data-sort="{{ u.section_completion_percent }}">
+                            {{ u.sections_completed }}/{{ u.total_sections }}
+                            ({{ u.section_completion_percent|floatformat:2 }}%)
+                        </td>
+                    
+                        <td data-sort="{{ u.quiz_completion_percent }}">
+                            {{ u.quizzes_completed }}/{{ u.total_quizzes }}
+                            ({{ u.quiz_completion_percent|floatformat:2 }}%)
+                        </td>
+                    
+                        <td data-sort="{{ u.medias_viewed|default:0 }}">
+                            {{ u.medias_viewed|default:0 }}
+                        </td>
+                    
+                        <td data-sort="{{ u.posttest_score|default:0 }}">
+                            {{ u.posttest_score }}
+                        </td>
+                    
+                        <td data-sort="{{ u.score_difference|default:0 }}">
+                            {{ u.score_difference }}
+                        </td>
+                    
+                        <td data-sort="{{ u.points|default:0 }}">
+                            {{ u.points }}
+                        </td>
+                    
+                        <td data-sort="{{ u.badges|default:0 }}">
+                            {% if u.badges|default:0 > 0 %}
+                                <img src="{% static 'oppia/images/badge.png' %}" style="height:16px;" />
+                                x {{ u.badges }}
+                            {% endif %}
+                        </td>
+                    
+                        <td data-sort="0">-</td>
                     </tr>
                 {% endfor %}
             {% endif %}
@@ -176,37 +313,191 @@
 
 <script>
     document.addEventListener("DOMContentLoaded", function () {
+    
+        const table = document.getElementById("completionTable");
+        const thead = table.querySelector("thead");
+        const tbody = table.querySelector("tbody");
+    
+        let currentSortCol = null;
+        let sortAsc = true;
+    
+        // ----------------------------
+        // Helpers
+        // ----------------------------
+        function isHidden(el) {
+            return el.style.display === "none";
+        }
+    
+        function parseValue(cell) {
+            if (!cell) return 0;
 
-        const table = document.querySelector("table.table");
+            const raw = cell.dataset.sort !== undefined
+                ? cell.dataset.sort
+                : cell.textContent;
 
-        // Hide unchecked columns on first load
-        document.querySelectorAll(".col-toggle").forEach(function (checkbox) {
-            const colIndex = parseInt(checkbox.getAttribute("data-col"));
-            if (!checkbox.checked) {
-                table.querySelectorAll("tr").forEach(function (row) {
-                    const cell = row.children[colIndex];
-                    if (cell) cell.style.display = "none";
-                });
+            const text = raw.toString().trim();
+
+            if (text === "" || text === "-") return 0;
+            if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+                return new Date(text.replace(" ", "T")).getTime();
             }
-        });
 
-        // Handle live show/hide
-        document.querySelectorAll(".col-toggle").forEach(function (checkbox) {
-            checkbox.addEventListener("change", function () {
-                const colIndex = parseInt(this.getAttribute("data-col"));
-                const show = this.checked;
+            // Percentage
+            if (text.endsWith("%")) {
+                return parseFloat(text.replace("%", "")) || 0;
+            }
 
-                table.querySelectorAll("tr").forEach(function (row) {
-                    const cell = row.children[colIndex];
-                    if (cell) cell.style.display = show ? "" : "none";
-                });
+            // Pure number
+            if (!isNaN(text)) {
+                return Number(text);
+            }
+
+            // String
+            return text.toLowerCase();
+        }
+        // ----------------------------
+        // Column toggle logic
+        // ----------------------------
+        function toggleColumn(colIndex, show) {
+            table.querySelectorAll("tr").forEach(row => {
+                const cell = row.children[colIndex];
+                if (cell) {
+                    cell.style.display = show ? "" : "none";
+                }
+            });
+        }
+    
+        function updateColspan() {
+            const visibleCols = Array.from(thead.querySelectorAll("th"))
+                .filter(th => !isHidden(th)).length;
+    
+            const completedHeader = tbody.querySelector(".completed-header th");
+            const incompletedHeader = tbody.querySelector(".incompleted-header th");
+    
+            if (completedHeader) completedHeader.colSpan = visibleCols;
+            if (incompletedHeader) incompletedHeader.colSpan = visibleCols;
+        }
+    
+        // Init toggles on load
+        document.querySelectorAll(".col-toggle").forEach(cb => {
+            const col = parseInt(cb.dataset.col);
+            toggleColumn(col, cb.checked);
+    
+            cb.addEventListener("change", function () {
+                toggleColumn(col, this.checked);
+                updateColspan();
             });
         });
+    
+        updateColspan();
+    
+        // ----------------------------
+        // Sorting logic
+        // ----------------------------
+        function sortTable(colIndex, asc) {
 
+            const allRows = Array.from(tbody.querySelectorAll("tr"));
+
+            const completedHeader = allRows.find(r => r.classList.contains("completed-header"));
+            const incompletedHeader = allRows.find(r => r.classList.contains("incompleted-header"));
+
+            const completedRows = [];
+            const incompletedRows = [];
+
+            let mode = null;
+
+            allRows.forEach(row => {
+                if (row === completedHeader) {
+                    mode = "completed";
+                    return;
+                }
+                if (row === incompletedHeader) {
+                    mode = "incompleted";
+                    return;
+                }
+
+                if (mode === "completed") completedRows.push(row);
+                if (mode === "incompleted") incompletedRows.push(row);
+            });
+
+            const sorter = (a, b) => {
+                const aCell = a.children[colIndex];
+                const bCell = b.children[colIndex];
+
+                const aVal = parseValue(aCell);
+                const bVal = parseValue(bCell);
+
+                if (aVal === bVal) return 0;
+                return asc ? (aVal > bVal ? 1 : -1) : (aVal < bVal ? 1 : -1);
+            };
+
+            completedRows.sort(sorter);
+            incompletedRows.sort(sorter);
+
+            tbody.innerHTML = "";
+
+            if (completedHeader) {
+                tbody.appendChild(completedHeader);
+                completedRows.forEach(r => tbody.appendChild(r));
+            }
+
+            if (incompletedHeader) {
+                tbody.appendChild(incompletedHeader);
+                incompletedRows.forEach(r => tbody.appendChild(r));
+            }
+        }
+        // ----------------------------
+        // Sort indicator handling
+        // ----------------------------
+        function resetIndicators() {
+            thead.querySelectorAll(".sort-indicator").forEach(ind => {
+                ind.textContent = "⇅";
+                ind.style.opacity = "0.3";
+            });
+        }
+    
+        function setIndicator(th, asc) {
+            const ind = th.querySelector(".sort-indicator");
+            if (!ind) return;
+            ind.textContent = asc ? "▲" : "▼";
+            ind.style.opacity = "1";
+        }
+    
+        resetIndicators();
+    
+        // Header click binding
+        thead.querySelectorAll("th.sortable").forEach(th => {
+            th.addEventListener("click", function () {
+    
+                const col = parseInt(this.dataset.sortCol);
+    
+                if (currentSortCol === col) {
+                    sortAsc = !sortAsc;
+                } else {
+                    currentSortCol = col;
+                    sortAsc = true;
+                }
+    
+                sortTable(col, sortAsc);
+                resetIndicators();
+                setIndicator(this, sortAsc);
+            });
+        });
+    
+        // ----------------------------
+        // Default sort (Completed At)
+        // ----------------------------
+        currentSortCol = 13;
+        sortAsc = true;
+        sortTable(currentSortCol, sortAsc);
+    
+        const defaultTh = thead.querySelector('th[data-sort-col="13"]');
+        resetIndicators();
+        if (defaultTh) setIndicator(defaultTh, true);
+    
     });
-
 </script>
-
+    
 <script>
     var dsets = {};
     google.charts.load('current', { packages: [] });
@@ -226,6 +517,7 @@
         dsets['completion_rates_data'].addColumn('number', "{% trans 'Posttest Score - Pretest Score' %}");
         dsets['completion_rates_data'].addColumn('number', "{% trans 'Points' %}");
         dsets['completion_rates_data'].addColumn('number', "{% trans 'Badges' %}");
+        dsets['completion_rates_data'].addColumn('string', "{% trans 'Completed At' %}");
 
 
         {% for u in all_users %}
@@ -238,11 +530,16 @@
                 "{{ u.completion_percent|floatformat:2 }}%",
                 "{{ u.sections_completed }}/{{ u.total_sections }} ({{ u.section_completion_percent|floatformat:2 }}%)",
                 "{{ u.quizzes_completed }}/{{ u.total_quizzes }} ({{ u.quiz_completion_percent|floatformat:2 }}%)",
-                "{{ u.medias_viewed }}/{{ u.total_medias }} ({{ u.media_viewed_percent|floatformat:2 }}%)",
+                "{{ u.medias_viewed }}",
                 Number({{ u.posttest_score|default:0 }}),
                 Number({{ u.score_difference|default:0 }}),
                 Number({{ u.points|default:0 }}),
-                Number({{ u.badges|default:0 }})
+                Number({{ u.badges|default:0 }}),
+                {% if u.completed_at %}
+                    "\"{{ u.completed_at|date:'Y-m-d H:i:s'|escapejs }}\""
+                {% else %}
+                    "\"\""
+                {% endif %}
             ]);
 
         {% endfor %}

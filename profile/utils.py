@@ -129,3 +129,39 @@ def get_users_filtered_by_customfields(users, search_form):
             filtered = True
 
     return users, filtered
+
+def set_exclude_from_reporting(user):
+    """
+    Checks if the user's 'facility' custom field is 'noorahealth' 
+    and sets exclude_from_reporting=True on UserProfile.
+    """
+    try:
+        profile = user.userprofile
+    except UserProfile.DoesNotExist:
+        return  # No profile, nothing to do
+
+    try:
+        facility_field = CustomField.objects.get(id='facility')
+        facility_value = UserProfileCustomField.get_user_value(user, facility_field)
+        if facility_value and str(facility_value).lower() == "noorahealth":
+            profile.exclude_from_reporting = True
+            profile.save(update_fields=['exclude_from_reporting'])
+    except CustomField.DoesNotExist:
+        # 'facility' field not defined, ignore
+        pass
+
+def get_paginated_users_list(request, queryset):
+    default_order = 'date_joined'
+    ordering = request.GET.get('order_by', None)
+    if ordering is None:
+        ordering = default_order
+
+    users = queryset.order_by(ordering)
+    paginator = Paginator(users, 5)
+
+    try:
+        page = int(request.GET.get('page', '1'))
+    except ValueError:
+        page = 1
+
+    return ordering, paginator.page(page)

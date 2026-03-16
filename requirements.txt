@@ -32,3 +32,5 @@ pytest-django
 
 #chnaged by namratha
 requests==2.31.0
+
+django-cors-headers==4.9.0
