@@ -1,741 +1,798 @@
-# oppia/models.py
-import datetime
-import json
-import os
+# oppia/uploader.py
 
-from shutil import copyfile
+import codecs
+import json
+import logging
+import os
+import shutil
+from zipfile import ZipFile, BadZipfile
+
+import xml.etree.ElementTree as ET
 
 from django.conf import settings
-from django.contrib.auth.models import User
-from django.db import models
-from django.db.models import Max, F
-from django.db.models.signals import post_save
-from django.dispatch.dispatcher import receiver
+from django.contrib import messages
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
-from tastypie.models import create_api_key
+from django.utils.translation import gettext as _
 
-from oppia import constants
-from quiz.models import QuizAttempt, Quiz, QuizProps
+from gamification.models import CourseGamificationEvent, \
+                                ActivityGamificationEvent, \
+                                MediaGamificationEvent
+from gamification.xml_writer import GamificationXMLWriter
+from oppia.models import Course, \
+    Section, \
+    Activity, \
+    Media, \
+    CoursePublishingLog, \
+    CoursePermissions, CourseStatus
+from oppia.utils.course_file import unescape_xml
+from quiz.models import Quiz, \
+                        Question, \
+                        QuizQuestion, \
+                        Response, \
+                        ResponseProps, \
+                        QuestionProps, \
+                        QuizProps
 
-from xml.dom.minidom import Document
-
-models.signals.post_save.connect(create_api_key, sender=User)
-
-STR_COURSE_INHERITED = _('Inherited from course')
-STR_GLOBAL_INHERITED = _('Inherited from global defaults')
-
-
-class CourseStatus(models.TextChoices):
-    LIVE = 'live', _('Live')
-    DRAFT = 'draft', _('Draft')
-    ARCHIVED = 'archived', _('Archived')
-    NEW_DOWNLOADS_DISABLED = 'new_downloads_disabled', _('New downloads disabled')
-    READ_ONLY = 'read_only', _('Read only')
-
-    @staticmethod
-    def get_available_statuses():
-        """
-        Get a subset of CourseStatus.choices based on the value of settings.OPPIA_AVAILABLE_COURSE_STATUSES
-        """
-        return [status for status in CourseStatus.choices if status[0] in settings.OPPIA_AVAILABLE_COURSE_STATUSES]
+# Get an instance of a logger
+logger = logging.getLogger(__name__)
 
 
-class Course(models.Model):
-    user = models.ForeignKey(User, null=True, on_delete=models.CASCADE)
-    created_date = models.DateTimeField('date created',
-                                        default=timezone.now)
-    lastupdated_date = models.DateTimeField('date updated',
-                                            default=timezone.now)
-    version = models.BigIntegerField()
-    title = models.TextField(blank=False)
-    description = models.TextField(blank=True,
-                                   null=True,
-                                   default=None)
-    shortname = models.CharField(max_length=200)
-    priority = models.IntegerField(default=0)
+def clean_lang_dict(elem_content):
+    if isinstance(elem_content, dict):
+        for lang in elem_content:
+            elem_content[lang] = elem_content[lang] \
+                .strip() \
+                .replace(u"\u00A0", " ")
+            return json.dumps(elem_content)
+    elif isinstance(elem_content, str):
+        return elem_content.strip().replace(u"\u00A0", " ")
+    else:
+        # If it was a boolean or a number (for some response types),
+        # return the value as is
+        return elem_content
 
-    filename = models.CharField(max_length=200)
-    badge_icon = models.FileField(upload_to="badges",
-                                  blank=True,
-                                  default=None)
-    status = models.CharField(max_length=100,
-                              help_text=_(constants.STATUS_FIELD_HELP_TEXT))
 
-    restricted = models.BooleanField(default=False, help_text=_(constants.RESTRICTED_FIELD_HELP_TEST))
+def get_course_shortname(f, extract_path, request, user):
+    result, mod_name = extract_file(f, extract_path, request, user)
+    if not result:
+        return result, mod_name
 
-    class Meta:
-        verbose_name = _('Course')
-        verbose_name_plural = _('Courses')
-        ordering = ['title']
+    xml_path = os.path.join(extract_path, mod_name, "module.xml")
+    # check that the module.xml file exists
+    if not os.path.isfile(xml_path):
+        msg_text = _(u"Zip file does not contain a module.xml file")
+        messages.info(request, msg_text, extra_tags="danger")
+        CoursePublishingLog(user=user,
+                            action="no_module_xml",
+                            data=msg_text).save()
+        return False, 400
 
-    def __str__(self):
-        return self.get_title(self)
+    # parse the module.xml file
+    doc = ET.parse(xml_path)
+    meta_info = parse_course_meta(doc)
 
-    def getAbsPath(self):
-        return os.path.join(settings.COURSE_UPLOAD_DIR, self.filename)
+    return True, meta_info['shortname']
 
-    def get_title(self, lang='en'):
-        try:
-            titles = json.loads(self.title)
-            if lang in titles:
-                return titles[lang]
-            else:
-                for local_lang in titles:
-                    return titles[local_lang]
-        except json.JSONDecodeError:
-            pass
-        return self.title
 
-    def is_first_download(self, user):
-        no_downloads = Tracker.objects.filter(user=user, course=self, type='download').count()
-        return no_downloads == 0
+def extract_file(f, extract_path, request, user):
+    zipfilepath = os.path.join(settings.COURSE_UPLOAD_DIR, f.name)
+    with open(zipfilepath, 'wb+') as destination:
+        for chunk in f.chunks():
+            destination.write(chunk)
+    try:
+        with ZipFile(zipfilepath) as zip_file:
+            zip_file.extractall(path=extract_path)
+            mod_name = ''
 
-    def no_downloads(self):
-        no_downloads = Tracker.objects.filter(course=self, type='download').count()
-        return no_downloads
+            top_level_file = {file.split('/')[0] for file in zip_file.namelist()}
+            if len(top_level_file) == 1:
+                top_level_filename = top_level_file.pop().split('/')[0]
+                if os.path.isdir(os.path.join(extract_path, top_level_filename)):
+                    mod_name = top_level_filename
 
-    def no_distinct_downloads(self):
-        no_distinct_downloads = Tracker.objects.filter(course=self, type='download') \
-            .values('user_id') \
-            .distinct().count()
-        return no_distinct_downloads
+    except (OSError, BadZipfile):
+        msg_text = _(u"Invalid zip file")
+        messages.error(request, msg_text, extra_tags="danger")
+        CoursePublishingLog(user=user,
+                            action="invalid_zip",
+                            data=msg_text).save()
+        shutil.rmtree(extract_path, ignore_errors=True)
+        return False, 500
 
-    def get_activity_today(self):
-        return Tracker.objects  \
-            .filter(course=self,
-                    tracker_date__day=timezone.now().day,
-                    tracker_date__month=timezone.now().month,
-                    tracker_date__year=timezone.now().year) \
-            .count()
+    return True, mod_name
 
-    def get_activity_week(self):
-        now = timezone.now()
-        last_week = timezone.make_aware(
-            datetime.datetime(now.year,
-                              now.month,
-                              now.day) - datetime.timedelta(days=7),
-            timezone.get_current_timezone())
-        return Tracker.objects.filter(course=self, tracker_date__gte=last_week).count()
 
-    def get_feedback_activities(self):
-        return Activity.objects.filter(section__course=self, type=Activity.FEEDBACK)
+def handle_uploaded_file(f, extract_path, request, user):
+    result, mod_name = extract_file(f, extract_path, request, user)
+    if not result:
+        return result, mod_name, False
 
-    def get_quiz_activities(self):
-        return Activity.objects.filter(section__course=self, type=Activity.QUIZ)
+    # check there is at least a sub dir
+    if mod_name == '':
+        msg_text = _(u"Invalid zip file")
+        messages.info(request, msg_text, extra_tags="danger")
+        CoursePublishingLog(user=user,
+                            action="invalid_zip",
+                            data=msg_text).save()
+        shutil.rmtree(extract_path, ignore_errors=True)
+        return False, 400, False
 
-    def has_quizzes(self):
-        return self.get_quiz_activities().exists()
+    response = 200
+    try:
+        course, response, is_new_course = process_course(extract_path, f, mod_name, request, user)
+    except Exception as e:
+        logger.error(e)
+        messages.error(request, str(e), extra_tags="danger")
+        CoursePublishingLog(user=user,
+                            action="upload_error",
+                            data=str(e)).save()
+        return False, 500, False
+    finally:
+        # remove the temp upload files
+        shutil.rmtree(extract_path, ignore_errors=True)
 
-    def has_feedback(self):
-        return self.get_feedback_activities().exists()
+    return course, response, is_new_course
 
-    def get_removed_quizzes(self):
-        current_quizzes = Activity.objects.filter(
-            section__course=self,
-            type=Activity.QUIZ).values_list('digest', flat=True)
-        old_quizzes_digests = Tracker.objects.filter(course=self,
-                                                     type=Activity.QUIZ) \
-            .exclude(digest__in=current_quizzes).values_list('digest',
-                                                             flat=True)
-        quizzes = Quiz.objects.filter(quizprops__name=QuizProps.DIGEST,
-                                      quizprops__value__in=old_quizzes_digests)
-        return quizzes
 
-    def get_removed_feedbacks(self):
-        current_quizzes = Activity.objects.filter(
-            section__course=self,
-            type=Activity.FEEDBACK).values_list('digest', flat=True)
-        old_quizzes_digests = Tracker.objects.filter(course=self,
-                                                     type=Activity.FEEDBACK) \
-            .exclude(digest__in=current_quizzes).values_list('digest',
-                                                             flat=True)
-        quizzes = Quiz.objects.filter(quizprops__name=QuizProps.DIGEST,
-                                      quizprops__value__in=old_quizzes_digests)
-        return quizzes
+def process_course(extract_path, f, mod_name, request, user):
+    xml_path = os.path.join(extract_path, mod_name, "module.xml")
+    # check that the module.xml file exists
+    if not os.path.isfile(xml_path):
+        msg_text = _(u"Zip file does not contain a module.xml file")
+        messages.info(request, msg_text, extra_tags="danger")
+        CoursePublishingLog(user=user,
+                            action="no_module_xml",
+                            data=msg_text).save()
+        return False, 400, False
 
-    def get_categories(self):
-        from oppia.models import Category
-        categories = Category.objects.filter(coursecategory__course=self)
-        category_str = ""
-        for c in categories:
-            category_str = category_str + c.name + ", "
-        return category_str[:-2]
+    # parse the module.xml file
+    doc = ET.parse(xml_path)
+    meta_info = parse_course_meta(doc)
 
-    def sections(self):
-        sections = Section.objects.filter(course=self).order_by('order')
-        return sections
+    is_new_course = False
+    oldsections = []
+    old_course_filename = None
+    old_course_version = None
 
-    def get_no_activities(self):
-        return Activity.objects.filter(section__course=self,
-                                       baseline=False).count()
-
-    def get_no_quizzes(self):
-        return Activity.objects.filter(section__course=self,
-                                       type=Activity.QUIZ,
-                                       baseline=False).count()
-
-    def get_no_media(self):
-        return Media.objects.filter(course=self).count()
-
-    def get_no_trackers(self):
-        return Tracker.objects.filter(course=self).count()
-
-    # ------------ Permissions management ----------------
-
-    def user_can_view(self, user):
-        if user.is_staff:
-            return True
-
-        if self.status is CourseStatus.ARCHIVED:
-            return False
-
-        if self.status != CourseStatus.DRAFT:
-            return True
-
-        if user.is_anonymous:
-            return False
-
-        try:
-            Course.objects.get(
-                pk=self.pk,
-                coursepermissions__course=self,
-                coursepermissions__user=user,
-                coursepermissions__role=CoursePermissions.VIEWER)
-            return True
-        except Course.DoesNotExist:
-            return False
-
-    def user_can_view_detail(self, user):
-        if user.is_staff:
-            return True
-        else:
-            try:
-                Course.objects.get(
-                    pk=self.pk,
-                    coursepermissions__course=self,
-                    coursepermissions__user=user,
-                    coursepermissions__role=CoursePermissions.MANAGER)
-                return True
-            except Course.DoesNotExist:
-                return False
-
-    def user_can_edit(self, user):
-        return self.user_can_view_detail(user)
-
-    def user_can_edit_gamification(self, user):
-        return self.user_can_edit(user) and \
-            self.status is not CourseStatus.ARCHIVED and \
-            self.status is not CourseStatus.NEW_DOWNLOADS_DISABLED and \
-            self.status is not CourseStatus.READ_ONLY
-
-    @staticmethod
-    def get_pre_test_score(course, user):
-        try:
-            baseline = Activity.objects.get(section__course=course,
-                                            type=Activity.QUIZ,
-                                            section__order=0)
-        except Activity.DoesNotExist:
-            return None
-
-        try:
-            quiz = Quiz.objects.filter(quizprops__value=baseline.digest,
-                                       quizprops__name=QuizProps.DIGEST)
-        except Quiz.DoesNotExist:
-            return None
-
-        attempts = QuizAttempt.objects.filter(quiz__in=quiz, user=user)
-        if attempts.count() != 0:
-            max_score = 100 \
-                * float(attempts.aggregate(max=Max('score'))['max']) \
-                / float(attempts[0].maxscore)
-            return max_score
-        else:
-            return None
-
-    @staticmethod
-    def get_no_quizzes_completed(course, user):
-        acts = Activity.objects.filter(section__course=course, baseline=False, type=Activity.QUIZ).values_list('digest')
-        quizzes = Quiz.objects.filter(quizprops__value__in=acts, quizprops__name=QuizProps.DIGEST)
-        quizzes_passed = QuizAttempt.objects \
-            .filter(quiz__in=quizzes, user=user)\
-            .annotate(percent=F('score')/F('maxscore'))\
-            .filter(percent__gte=0.75) \
-            .values_list('quiz__id').distinct()
-        return quizzes_passed.count()
-
-    @staticmethod
-    def get_activities_completed(course, user):
-        acts = Activity.objects.filter(section__course=course, baseline=False).values_list('digest')
-        return Tracker.objects.filter(course=course, user=user, completed=True, digest__in=acts) \
-            .values_list('digest') \
-            .distinct() \
-            .count()
-
-    @staticmethod
-    def get_media_viewed(course, user):
-        media = Media.objects.filter(course=course)
-
-        tracker_viewed = Tracker.objects.filter(
-            course=course,
+    # Find if course already exists
+    try:
+        course = Course.objects.get(shortname=meta_info['shortname'])
+        course_manager = CoursePermissions.objects.filter(
             user=user,
-            digest__in=media.values_list('digest'),
-            completed=True) \
-            .values_list('digest') \
-            .distinct() \
-            .count()
+            course=course,
+            role=CoursePermissions.MANAGER).count()
+        # check that the current user is allowed to wipe out the other course
+        if course.user != user and course_manager == 0:
+            msg_text = \
+                _(u"Sorry, you do not have permissions to update this course.")
+            messages.info(request, msg_text)
+            CoursePublishingLog(course=course,
+                                new_version=meta_info['versionid'],
+                                old_version=course.version,
+                                user=user,
+                                action="permissions_error",
+                                data=msg_text).save()
+            return False, 401, is_new_course
+        # check if course version is older
+        if course.version > meta_info['versionid']:
+            msg_text = _(u"A newer version of this course already exists")
+            messages.info(request, msg_text)
+            CoursePublishingLog(course=course,
+                                new_version=meta_info['versionid'],
+                                old_version=course.version,
+                                user=user,
+                                action="newer_version_exists",
+                                data=msg_text).save()
+            return False, 400, is_new_course
 
-        return tracker_viewed
+        # obtain the old sections
+        oldsections = list(Section.objects.filter(course=course)
+                           .values_list('pk', flat=True))
+        # wipe out old media
+        oldmedia = Media.objects.filter(course=course)
+        oldmedia.delete()
 
-    def is_live(self):
-        return self.status == CourseStatus.LIVE
+        old_course_filename = course.filename
+        course.lastupdated_date = timezone.now()
+        old_course_version = course.version
+        result, error_msg = validate_course_status(course, request)
+        if result is False:
+            CoursePublishingLog(course=course,
+                                new_version=meta_info['versionid'],
+                                old_version=old_course_version,
+                                user=user,
+                                action="invalid_course_status",
+                                data=error_msg).save()
+            return result, 400, is_new_course
 
-    def is_draft(self):
-        return self.status == CourseStatus.DRAFT
+    except Course.DoesNotExist:
+        course = Course()
+        is_new_course = True
 
-    def is_archived(self):
-        return self.status == CourseStatus.ARCHIVED
+    course.status = request.POST['status']
+    course.shortname = meta_info['shortname']
+    course.title = meta_info['title']
+    course.description = meta_info['description']
+    course.version = meta_info['versionid']
+    course.priority = int(meta_info['priority'])
+    course.user = user
+    course.filename = f.name
+    course.save()
 
-    def are_new_downloads_disabled(self):
-        return self.status == CourseStatus.NEW_DOWNLOADS_DISABLED
+    if not parse_course_contents(request, doc, course, user, is_new_course, extract_path, mod_name):
+        return False, 500, is_new_course
+    clean_old_course(request, user, oldsections, old_course_filename, course)
 
-    def is_read_only(self):
-        return self.status == CourseStatus.READ_ONLY
+    # save gamification events
+    if 'gamification' in meta_info:
+        events = parse_gamification_events(meta_info['gamification'])
+        for event in events:
+            # Only add events if the didn't exist previously
+            e, created = CourseGamificationEvent.objects.get_or_create(
+                course=course, event=event['name'],
+                defaults={'points': event['points'], 'user': user})
 
+            if created:
+                msg_text = \
+                    _(u'Gamification for "%(event)s" at course level added') \
+                    % {'event': e.event}
+                messages.info(request, msg_text)
+                CoursePublishingLog(course=course,
+                                    new_version=meta_info['versionid'],
+                                    old_version=old_course_version,
+                                    user=user,
+                                    action="gamification_added",
+                                    data=msg_text).save()
 
-class CoursePermissions(models.Model):
+    tmp_path = replace_zip_contents(xml_path, doc, mod_name, extract_path)
+    # Extract the final file into the courses area for preview
+    zipfilepath = os.path.join(settings.COURSE_UPLOAD_DIR, f.name)
+    shutil.copy(tmp_path + ".zip", zipfilepath)
 
-    MANAGER = 'manager'
-    VIEWER = 'viewer'
-    ROLE_TYPES = (
-        (MANAGER, 'Manager'),
-        (VIEWER, 'Viewer')
-    )
+    course_preview_path = os.path.join(settings.MEDIA_ROOT, "courses")
+    ZipFile(zipfilepath).extractall(path=course_preview_path)
 
-    course = models.ForeignKey(Course, on_delete=models.CASCADE)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    role = models.CharField(max_length=20, choices=ROLE_TYPES)
+    writer = GamificationXMLWriter(course)
+    writer.update_gamification(request.user)
 
-    class Meta:
-        verbose_name = _('Course Permission')
-        verbose_name_plural = _('Course Permissions')
-
-
-class Section(models.Model):
-    course = models.ForeignKey(Course, on_delete=models.CASCADE)
-    order = models.IntegerField()
-    title = models.TextField(blank=False)
-
-    class Meta:
-        verbose_name = _('Section')
-        verbose_name_plural = _('Sections')
-
-    def __str__(self):
-        return self.get_title()
-
-    def get_title(self, lang='en'):
-        try:
-            titles = json.loads(self.title)
-            if lang in titles:
-                return titles[lang]
-            else:
-                for local_lang in titles:
-                    return titles[local_lang]
-        except json.JSONDecodeError:
-            pass
-        return self.title
-
-    def activities(self):
-        activities = Activity.objects.filter(section=self).order_by('order')
-        return activities
-
-
-class Activity(models.Model):
-    QUIZ = 'quiz'
-    MEDIA = 'media'
-    PAGE = 'page'
-    FEEDBACK = 'feedback'
-    ACTIVITY_TYPES = (
-        (QUIZ, 'Quiz'),
-        (MEDIA, 'Media'),
-        (PAGE, 'Page'),
-        (FEEDBACK, 'Feedback')
-    )
-
-    section = models.ForeignKey(Section, on_delete=models.CASCADE)
-    order = models.IntegerField(default=0)
-    min_activity_time = models.IntegerField(default=3)
-    title = models.TextField(blank=False)
-    type = models.CharField(max_length=10)
-    digest = models.CharField(max_length=100)
-    baseline = models.BooleanField(default=False)
-    image = models.TextField(blank=True, null=True, default=None)
-    content = models.TextField(blank=True, null=True, default=None)
-    description = models.TextField(blank=True, null=True, default=None)
-
-    def __str__(self):
-        return self.get_title()
-
-    class Meta:
-        ordering = ['id']
-        verbose_name = _('Activity')
-        verbose_name_plural = _('Activities')
-
-    def get_title(self, lang='en'):
-        try:
-            titles = json.loads(self.title)
-            if lang in titles:
-                return titles[lang]
-            else:
-                for local_lang in titles:
-                    return titles[local_lang]
-        except json.JSONDecodeError:
-            pass
-        return self.title
-
-    def get_content(self, lang='en'):
-        try:
-            contents = json.loads(self.content)
-            if lang in contents:
-                return contents[lang]
-            else:
-                for local_lang in contents:
-                    return contents[local_lang]
-        except json.JSONDecodeError:
-            pass
-        return self.content
-
-    def get_next_activity(self):
-        try:
-            next_activity = Activity.objects \
-                                .get(section__course=self.section.course,
-                                     order=self.order + 1,
-                                     section=self.section)
-        except Activity.DoesNotExist:
-            try:
-                next_activity = Activity.objects.get(
-                                    section__course=self.section.course,
-                                    section__order=self.section.order + 1,
-                                    order=1)
-            except Activity.DoesNotExist:
-                next_activity = None
-        return next_activity
-
-    def get_previous_activity(self):
-        try:
-            prev_activity = Activity.objects.get(
-                                section__course=self.section.course,
-                                order=self.order - 1,
-                                section=self.section)
-        except Activity.DoesNotExist:
-            try:
-                max_order = Activity.objects \
-                              .filter(section__course=self.section.course,
-                                      section__order=self.section.order - 1) \
-                              .aggregate(max_order=Max('order'))
-                prev_activity = Activity.objects.get(
-                                    section__course=self.section.course,
-                                    section__order=self.section.order - 1,
-                                    order=max_order['max_order'])
-            except Activity.DoesNotExist:
-                prev_activity = None
-        return prev_activity
-
-    def get_event_points(self):
-        from gamification.models import DefaultGamificationEvent, \
-                                        CourseGamificationEvent, \
-                                        ActivityGamificationEvent
-        event_points = []
-
-        # first check if there are specific points for this activity
-        activity_custom_points = ActivityGamificationEvent.objects \
-            .filter(activity=self)
-        if len(activity_custom_points) > 0:
-            source = _('Custom Points')
-            return {'events': activity_custom_points, 'source': source}
-
-        # if not, then check the points for the course as a whole or then the
-        # global default points
-        if self.type == self.PAGE:
-            course_custom_points = CourseGamificationEvent.objects \
-                .filter(course__section__activity=self,
-                        event__startswith='activity_')
-
-            if len(course_custom_points) > 0:
-                source = STR_COURSE_INHERITED
-                return {'events': course_custom_points, 'source': source}
-            else:
-                default_activity_events = DefaultGamificationEvent.objects \
-                    .filter(level=DefaultGamificationEvent.ACTIVITY)
-                source = STR_COURSE_INHERITED
-                return {'events': default_activity_events, 'source': source}
-
-        if self.type == self.QUIZ:
-            course_custom_points = CourseGamificationEvent.objects \
-                .filter(course__section__activity=self,
-                        event__startswith='quiz_')
-            if len(course_custom_points) > 0:
-                source = STR_COURSE_INHERITED
-                return {'events': course_custom_points, 'source': source}
-            else:
-                default_quiz_events = DefaultGamificationEvent.objects \
-                    .filter(level=DefaultGamificationEvent.QUIZ)
-                source = STR_GLOBAL_INHERITED
-                return {'events': default_quiz_events, 'source': source}
-
-        return event_points
-
-    def get_no_quiz_responses(self):
-        # get the actual quiz id
-        quiz = Quiz.objects.filter(quizprops__name=QuizProps.DIGEST,
-                                   quizprops__value=self.digest).last()
-        return QuizAttempt.objects.filter(
-            quiz_id=quiz.id).count() if quiz is not None else 0
+    return course, 200, is_new_course
 
 
-class Media(models.Model):
-    URL_MAX_LENGTH = 250
+def process_course_sections(request, structure, course, user, is_new_course, extract_path, mod_name):
+    for index, section in enumerate(structure.findall("section")):
 
-    course = models.ForeignKey(Course, on_delete=models.CASCADE)
-    digest = models.CharField(max_length=100)
-    filename = models.CharField(max_length=200)
-    download_url = models.URLField(max_length=URL_MAX_LENGTH)
-    filesize = models.BigIntegerField(default=None, blank=True, null=True)
-    media_length = models.IntegerField(default=None, blank=True, null=True)
+        activities = section.find('activities')
+        # Check if the section contains any activity
+        # (to avoid saving an empty one)
+        if activities is None or len(activities.findall('activity')) == 0:
+            msg_text = _("Section ") \
+                        + str(index + 1) \
+                        + _(" does not contain any activities.")
+            messages.info(request, msg_text)
+            CoursePublishingLog(course=course,
+                                user=user,
+                                action="no_activities",
+                                data=msg_text).save()
+            continue
 
-    class Meta:
-        verbose_name = _('Media')
-        verbose_name_plural = _('Media')
+        title = {}
+        for t in section.findall('title'):
+            title[t.get('lang')] = t.text
 
-    def __str__(self):
-        return self.filename
+        section = Section(
+            course=course,
+            title=json.dumps(title),
+            order=section.get('order')
+        )
+        section.save()
 
-    def get_event_points(self):
-        from gamification.models import DefaultGamificationEvent, \
-                                        CourseGamificationEvent, \
-                                        MediaGamificationEvent
+        for act in activities.findall("activity"):
+            parse_and_save_activity(request,
+                                    user,
+                                    course,
+                                    section,
+                                    act,
+                                    extract_path,
+                                     mod_name,
+                                    is_new_course)
 
-        # first check if there are specific points for this activity
-        media_custom_points = MediaGamificationEvent.objects \
-            .filter(media=self)
-        if media_custom_points.exists():
-            source = _('Custom Points')
-            return {'events': media_custom_points, 'source': source}
 
-        # if not, then check the points for the course as a whole or then
-        # the global default points
-        course_custom_points = CourseGamificationEvent.objects \
-            .filter(course=self.course,
-                    event__startswith='media_')
+def process_course_media_events(request, media, events, course, user):
+    for event in events:
+        # Only add events if the didn't exist previously
+        e, created = MediaGamificationEvent.objects \
+            .get_or_create(media=media,
+                           event=event['name'],
+                           defaults={'points': event['points'],
+                                     'user': request.user})
 
-        if course_custom_points.exists():
-            source = STR_COURSE_INHERITED
-            return {'events': course_custom_points, 'source': source}
+        if created:
+            msg_text = _(u'Gamification for "%(event)s" at course \
+                        level added') % {'event': e.event}
+            messages.info(request, msg_text)
+            CoursePublishingLog(course=course,
+                                user=user,
+                                action="course_gamification_added",
+                                data=msg_text).save()
+
+
+def process_course_media(request, media_element, course, user):
+    for file_element in media_element.findall('file'):
+        media = Media()
+        media.course = course
+        media.filename = file_element.get("filename")
+        url = file_element.get("download_url")
+        media.digest = file_element.get("digest")
+
+        if len(url) > Media.URL_MAX_LENGTH:
+            msg_text = _(u'File %(filename)s has a download URL larger \
+                        than the maximum length permitted. The media file \
+                        has not been registered, so it won\'t be tracked. \
+                        Please, fix this issue and upload the course \
+                        again.') % {'filename': media.filename}
+            messages.info(request, msg_text)
+            CoursePublishingLog(course=course,
+                                user=user,
+                                action="media_url_too_long",
+                                data=msg_text).save()
         else:
-            default_media_events = DefaultGamificationEvent.objects \
-                .filter(level=DefaultGamificationEvent.MEDIA)
-            source = STR_GLOBAL_INHERITED
-            return {'events': default_media_events, 'source': source}
+            media.download_url = url
+            # get any optional attributes
+            for attr_name, attr_value in file_element.attrib.items():
+                if attr_name == "length":
+                    media.media_length = attr_value
+                if attr_name == "filesize":
+                    media.filesize = attr_value
+
+            media.save()
+            # save gamification events
+            gamification = file_element.find('gamification')
+            events = parse_gamification_events(gamification)
+
+            process_course_media_events(request, media, events, course, user)
 
 
-class Tracker(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    submitted_date = models.DateTimeField('date submitted',
-                                          default=timezone.now,
-                                          db_index=True)
-    tracker_date = models.DateTimeField('date tracked',
-                                        default=timezone.now,
-                                        db_index=True)
-    ip = models.GenericIPAddressField(null=True, blank=True, default=None)
-    agent = models.TextField(blank=True)
-    digest = models.CharField(max_length=100)
-    data = models.TextField(blank=True)
-    course = models.ForeignKey(Course,
-                               null=True,
-                               blank=True,
-                               default=None,
-                               on_delete=models.SET_NULL)
-    type = models.CharField(max_length=10,
-                            null=True,
-                            blank=True,
-                            default=None)
-    completed = models.BooleanField(default=False)
-    time_taken = models.IntegerField(default=0)
-    course_version = models.BigIntegerField(null=True, blank=True)
-    activity_title = models.TextField(blank=True,
-                                      null=True,
-                                      default=None)
-    section_title = models.TextField(blank=True,
-                                     null=True,
-                                     default=None)
-    uuid = models.CharField(max_length=100,
-                            blank=True,
-                            null=True,
-                            default=None,
-                            db_index=True)
-    lang = models.CharField(max_length=10,
-                            null=True,
-                            blank=True,
-                            default=None)
-    points = models.IntegerField(blank=True,
-                                 null=True,
-                                 default=None)
-    event = models.CharField(max_length=50,
-                             null=True,
-                             blank=True,
-                             default=None)
+def parse_course_contents(request, xml_doc, course, user, is_new_course, extract_path, mod_name):
 
-    class Meta:
-        verbose_name = _('Tracker')
-        verbose_name_plural = _('Trackers')
-        indexes = [models.Index(fields=['course', 'user']), ]
+    # add in any baseline activities
+    parse_baseline_activities(request, xml_doc, course, user, is_new_course, extract_path, mod_name)
 
-    def __str__(self):
-        return self.agent
-
-    def is_first_tracker_today(self):
-        olddate = timezone.now() + datetime.timedelta(hours=-24)
-        no_attempts_today = Tracker.objects \
-            .filter(user=self.user,
-                    digest=self.digest,
-                    completed=True,
-                    submitted_date__gte=olddate) \
-            .count()
-        if no_attempts_today == 1:
-            return True
-        else:
-            return False
-
-    def get_activity_type(self):
-        activities = Activity.objects.filter(digest=self.digest)
-        for a in activities:
-            return a.type
-        media = Media.objects.filter(digest=self.digest)
-        if media.exists():
-            return "media"
-        return None
-
-    def get_media_title(self):
-        media = Media.objects.filter(digest=self.digest)
-        for m in media:
-            return m.filename
-        return None
-
-    def get_activity_title(self, lang='en'):
-        media = Media.objects.filter(digest=self.digest)
-        for m in media:
-            return m.filename
-        try:
-            activity = Activity.objects.filter(digest=self.digest)
-            for a in activity:
-                titles = json.loads(a.title)
-                if lang in titles:
-                    return titles[lang]
-                else:
-                    for local_lang in titles:
-                        return titles[local_lang]
-        except TypeError:
-            pass
-        return self.activity_title
-
-    def get_section_title(self, lang='en'):
-        try:
-            titles = json.loads(self.section_title)
-            if lang in titles:
-                return titles[lang]
-            else:
-                for local_lang in titles:
-                    return titles[local_lang]
-        except TypeError:
-            pass
-        return self.section_title
-
-    def activity_exists(self):
-        activities = Activity.objects.filter(digest=self.digest)
-        if activities.exists():
-            return True
-        media = Media.objects.filter(digest=self.digest)
-        if media.exists():
-            return True
+    # add all the sections and activities
+    structure = xml_doc.find("structure")
+    if len(structure.findall("section")) == 0:
+        course.delete()
+        msg_text = \
+            _(u"There don't appear to be any activities in this upload file.")
+        messages.info(request, msg_text, extra_tags="danger")
+        CoursePublishingLog(user=user,
+                            action="no_activities",
+                            data=msg_text).save()
         return False
 
-    @staticmethod
-    def has_completed_trackers(course, user):
-        return Tracker.objects.filter(user=user, course=course, completed=True).exists()
+    process_course_sections(request, structure, course, user, is_new_course, extract_path, mod_name)
 
-    @staticmethod
-    def to_xml_string(course, user):
-        doc = Document()
-        tracker_xml = doc.createElement('trackers')
-        doc.appendChild(tracker_xml)
-        trackers = Tracker.objects.filter(user=user, course=course)
-        for t in trackers:
-            track = doc.createElement('tracker')
-            track.setAttribute('digest', t.digest)
-            track.setAttribute('submitteddate',
-                               t.submitted_date.strftime('%Y-%m-%d %H:%M:%S'))
-            track.setAttribute('completed', str(t.completed))
-            track.setAttribute('type', t.type)
-            track.setAttribute('event', t.event)
-            track.setAttribute('points', str(t.points))
-            track.setAttribute('uuid', t.uuid)
-            if t.type == 'quiz':
-                try:
-                    quiz = doc.createElement('quiz')
-                    data = json.loads(t.data)
-                    quiz_attempt = QuizAttempt.objects \
-                        .filter(instance_id=data['instance_id'],
-                                user=user) \
-                        .order_by('-submitted_date').first()
-                    if quiz_attempt:
-                        quiz.setAttribute('score', str(quiz_attempt.score))
-                        quiz.setAttribute('maxscore',
-                                          str(quiz_attempt.maxscore))
-                        quiz.setAttribute('submitteddate',
-                                          quiz_attempt
-                                          .submitted_date
-                                          .strftime('%Y-%m-%d %H:%M:%S'))
-                        quiz.setAttribute('passed', str(t.completed))
-                        quiz.setAttribute("course", course.shortname)
-                        quiz.setAttribute("event", quiz_attempt.event)
-                        quiz.setAttribute("points", str(quiz_attempt.points))
-                        quiz.setAttribute("timetaken",
-                                          str(quiz_attempt.time_taken))
-                        track.appendChild(quiz)
-                except QuizAttempt.DoesNotExist:
-                    pass
-                except json.JSONDecodeError:
-                    pass
-            tracker_xml.appendChild(track)
-        return doc.toxml()
+    media_element = xml_doc.find('media')
+    if media_element is not None:
+        process_course_media(request, media_element, course, user)
+    return True
 
-    @staticmethod
-    def activity_views(user,
-                       type,
-                       start_date=None,
-                       end_date=None,
-                       course=None):
-        results = Tracker.objects.filter(user=user, type=type)
-        if start_date:
-            results = results.filter(submitted_date__gte=start_date)
-        if end_date:
-            results = results.filter(submitted_date__lte=end_date)
-        if course:
-            results = results.filter(course=course)
-        return results.count()
 
-    def get_lang(self):
+def parse_baseline_activities(request, xml_doc, course, user, is_new_course, extract_path, mod_name):
+
+    for meta in xml_doc.findall('meta')[:1]:
+        activity_nodes = meta.findall("activity")
+        if len(activity_nodes) > 0:
+            section = Section(
+                course=course,
+                title='{"en": "Baseline"}',
+                order=0
+            )
+            section.save()
+            for activity_node in activity_nodes:
+                parse_and_save_activity(request,
+                                        user,
+                                        course,
+                                        section,
+                                        activity_node,
+                                        extract_path,
+                                         mod_name,
+                                        is_new_course,
+                                        is_baseline=True)
+
+
+def get_activity_content(activity):
+    content = ""
+    activity_type = activity.get("type")
+    if activity_type == "page" or activity_type == "url":
+        temp_content = {}
+        for t in activity.findall("location"):
+            if t.text:
+                temp_content[t.get('lang')] = t.text
+        content = json.dumps(temp_content)
+    elif activity_type == "quiz" or activity_type == "feedback":
+        for c in activity.findall("content"):
+            content = c.text
+    elif activity_type == "resource":
+        for c in activity.findall("location"):
+            content = c.text
+    else:
+        content = None
+
+    return content, activity_type
+
+def parse_and_save_activity(request,
+                            user,
+                            course,
+                            section,
+                            activity_node,
+                            extract_path, 
+                            mod_name,
+                            is_new_course,
+                            is_baseline=False):
+    """
+    Parses an Activity XML and saves it to the DB
+    :param section: section the activity belongs to
+    :param act: a XML DOM element containing a single activity
+    :param is_new_course: boolean indicating if it is a new course or existed
+            previously
+    :param is_baseline: is the activity part of the baseline?
+    :return: None
+    """
+
+    title = {}
+    for t in activity_node.findall('title'):
+        title[t.get('lang')] = t.text
+    title = json.dumps(title) if title else None
+
+    description = {}
+    for t in activity_node.findall('description'):
+        description[t.get('lang')] = t.text
+    description = json.dumps(description) if description else None
+
+    content, activity_type = get_activity_content(activity_node)
+
+    image = None
+    for i in activity_node.findall("image"):
+        image = i.get('filename')
+
+    digest = activity_node.get("digest")
+    
+    existed = False
+    try:
+        activity = Activity.objects.get(
+            digest=digest, section__course__shortname=course.shortname)
+        existed = True
+    except Activity.DoesNotExist:
+        activity = Activity()
+
+    activity.section = section
+    activity.title = title
+    activity.type = activity_type
+    activity.order = activity_node.get("order")
+    activity.min_activity_time = activity_node.get("activity_time")
+    activity.digest = digest
+    activity.baseline = is_baseline
+    activity.image = image
+    activity.content = content
+    activity.description = description
+
+    if not existed and not is_new_course:
+        msg_text = _(u'Activity "%(act)s"(%(digest)s) did not exist \
+                     previously.') % {'act': activity.title,
+                                      'digest': activity.digest}
+        messages.warning(request, msg_text)
+        CoursePublishingLog(course=course,
+                            user=user,
+                            action="activity_added",
+                            data=msg_text).save()
+    else:
+        msg_text = _(u'Activity "%(act)s"(%(digest)s) previously existed. \
+                    Updated with new information') \
+                    % {'act': activity.title,
+                       'digest': activity.digest}
+        '''
+        If we also want to show the activities that previously existed,
+        uncomment this next line
+        messages.info(req, msg_text)
+        '''
+        CoursePublishingLog(course=course,
+                            user=user,
+                            action="activity_updated",
+                            data=msg_text).save()
+
+    if (activity_type == "quiz") or (activity_type == "feedback"):
+        updated_json = parse_and_save_quiz(user, activity)
+        # we need to update the JSON contents both in the XML and in the
+        # activity data
+        activity_node.find("content").text = \
+            "<![CDATA[ " + updated_json + "]]>"
+        activity.content = updated_json
+
+    activity.save()
+
+    # save gamification events
+    gamification = activity_node.find('gamification')
+    events = parse_gamification_events(gamification)
+    for event in events:
+        e, created = ActivityGamificationEvent.objects.get_or_create(
+            activity=activity, event=event['name'],
+            defaults={'points': event['points'], 'user': request.user})
+
+        if created:
+            msg_text = _(u'Gamification for "%(event)s" at activity \
+                        "%(act)s"(%(digest)s) added') \
+                      % {'event': e.event,
+                         'act': activity.title,
+                         'digest': activity.digest}
+            messages.info(request, msg_text)
+            CoursePublishingLog(course=course,
+                                user=user,
+                                action="activity_gamification_added",
+                                data=msg_text).save()
+
+
+def parse_and_save_quiz(user, activity):
+    """
+    Parses activity content that is a Quiz and saves it to the DB
+    :parm user: the user that uploaded the course
+    :param activity: an activity object that contains the quiz as a json object
+    :return: None
+    """
+
+    quiz_obj = json.loads(activity.content)
+    quiz_existed = False
+    # first of all, we find the quiz digest to see if it is already saved
+    if quiz_obj['props']['digest']:
+        quiz_digest = quiz_obj['props']['digest']
+
         try:
-            json_data = json.loads(self.data)
-        except ValueError:
-            return None
+            quizzes = Quiz.objects.filter(quizprops__value=quiz_digest,
+                                          quizprops__name=QuizProps.DIGEST) \
+                                          .order_by('-id')
+            quiz_existed = len(quizzes) > 0
+            # remove any possible duplicate (possible scenario when
+            # transitioning between export versions)
+            for quiz in quizzes[1:]:
+                quiz.delete()
 
-        if 'lang' in json_data:
-            return json_data['lang']
+        except Quiz.DoesNotExist:
+            quiz_existed = False
 
-@receiver(post_save, sender=Course)
-def uploaded_course_save_to_external(sender, instance, **kwargs):
-    if settings.OPPIA_EXTERNAL_STORAGE:
-        copy_from = os.path.join(settings.COURSE_UPLOAD_DIR, instance.filename)
-        copy_to = os.path.join(settings.OPPIA_EXTERNAL_STORAGE_COURSE_ROOT, instance.filename)
-        copyfile(copy_from, copy_to)
+    if quiz_existed:
+        quiz = update_quiz(user, quizzes.first(), quiz_obj)
+    else:
+        quiz = create_quiz(user, quiz_obj)
+
+    # add quiz props
+    quiz_obj['id'] = quiz.pk
+    create_or_update_quiz_props(quiz, quiz_obj)
+
+    return json.dumps(quiz_obj)
+
+
+def create_quiz(user, quiz_obj):
+    quiz = Quiz()
+    add_quiz_info(user, quiz, quiz_obj)
+
+    # add quiz questions
+    create_quiz_questions(user, quiz, quiz_obj)
+
+    return quiz
+
+
+def update_quiz(user, quiz, quiz_obj):
+    add_quiz_info(user, quiz, quiz_obj)
+    # If the quiz already existed (same digest) we can update the questions
+    # based on its current titles, assuming they haven't changed
+    update_quiz_questions(quiz, quiz_obj)
+
+    return quiz
+
+
+def get_content(elem, node_name):
+    for node in elem.findall(node_name):
+        return None if node is None else node.text
+    return None
+
+
+def parse_course_meta(xml_doc):
+
+    meta_info = {'versionid': 0, 'shortname': ''}
+    for meta in xml_doc.findall('meta')[:1]:
+        meta_info['versionid'] = int(meta.find('versionid').text)
+
+        meta_info['priority'] = int(meta.find('priority').text)
+
+        title = {}
+        for t in meta.findall('title'):
+            title[t.get('lang')] = t.text
+        meta_info['title'] = json.dumps(title)
+
+        description = {}
+        for t in meta.findall('description'):
+            description[t.get('lang')] = t.text
+        meta_info['description'] = json.dumps(description)
+
+        meta_info['shortname'] = get_content(meta, 'shortname')
+        exportversion = meta.find('exportversion')
+        if exportversion is not None:
+            meta_info['exportversion'] = exportversion
+        meta_info['gamification'] = meta.find('gamification')
+
+    return meta_info
+
+
+def parse_gamification_events(element):
+    events = []
+    if element is not None:
+        for e in element.findall("event"):
+            event_name = e.get('name')
+            points = e.text
+            events.append({'name': event_name, 'points': points})
+    return events
+
+
+def replace_zip_contents(xml_path,
+                         xml_doc,
+                         mod_name,
+                         dest,
+                         encoding='utf-8'):
+
+    with codecs.open(xml_path, mode="w", encoding=encoding) as fh:
+        new_xml = ET.tostring(xml_doc.getroot(),
+                              encoding=encoding).decode('utf-8')
+        new_xml = unescape_xml(new_xml)
+        fh.write("<?xml version='1.0' encoding='%s'?>\n" % encoding)
+        fh.write(new_xml)
+
+    tmp_zipfilepath = os.path.join(dest, 'tmp_course')
+    shutil.make_archive(tmp_zipfilepath, 'zip', dest, base_dir=mod_name)
+    return tmp_zipfilepath
+
+
+def clean_old_course(req, user, oldsections, old_course_filename, course):
+    for section in oldsections:
+        sec = Section.objects.get(pk=section)
+        for act in sec.activities():
+            msg_text = _(u'Activity "%(act)s"(%(digest)s) is no longer in \
+                        the course.') % {'act': act.title,
+                                         'digest': act.digest}
+            messages.info(req, msg_text)
+            CoursePublishingLog(course=course,
+                                user=user,
+                                action="activity_removed",
+                                data=msg_text).save()
+        sec.delete()
+
+    if old_course_filename is not None and old_course_filename != course.filename:
+        try:
+            os.remove(os.path.join(settings.COURSE_UPLOAD_DIR,
+                                   old_course_filename))
+        except OSError:
+            pass
+
+
+# helper functions
+def create_or_update_quiz_props(quiz, quiz_obj):
+    for prop in quiz_obj['props']:
+        if prop != 'id':
+            qprop, created = QuizProps.objects.get_or_create(quiz=quiz,
+                                                             name=prop)
+            qprop.value = quiz_obj['props'][prop]
+            qprop.save()
+
+
+def create_quiz_questions(user, quiz, quiz_obj):
+    for q in quiz_obj['questions']:
+
+        question = Question(owner=user,
+                            type=q['question']['type'],
+                            title=clean_lang_dict(q['question']['title']))
+
+        question.save()
+
+        quiz_question = QuizQuestion(quiz=quiz,
+                                     question=question,
+                                     order=q['order'])
+        quiz_question.save()
+
+        q['id'] = quiz_question.pk
+        q['question']['id'] = question.pk
+
+        for prop in q['question']['props']:
+            if prop != 'id':
+                QuestionProps(
+                    question=question, name=prop,
+                    value=q['question']['props'][prop]
+                ).save()
+
+        for r in q['question']['responses']:
+            response = Response(
+                owner=user,
+                question=question,
+                title=clean_lang_dict(r['title']),
+                score=r['score'],
+                order=r['order']
+            )
+            response.save()
+            r['id'] = response.pk
+
+            for prop in r['props']:
+                if prop != 'id':
+                    ResponseProps(
+                        response=response, name=prop,
+                        value=r['props'][prop]
+                    ).save()
+
+
+def add_quiz_info(user, quiz, quiz_obj):
+    quiz.owner = user
+    quiz.title = clean_lang_dict(quiz_obj['title'])
+    quiz.description = clean_lang_dict(quiz_obj['description'])
+    quiz.save()
+
+
+def update_quiz_questions(quiz, quiz_obj):
+    for q in quiz_obj['questions']:
+        question = Question.objects.filter(
+            type=q['question']['type'],
+            title=clean_lang_dict(q['question']['title']),
+            quiz=quiz)
+
+        if not question:
+            question_prop = QuestionProps.objects.filter(name="moodle_question_id",
+                                                         value=q['question']['props']['moodle_question_id']) \
+                                                         .order_by('-id').first()
+
+            if not question_prop:
+                continue
+
+            question_id = question_prop.question_id
+
+            question = Question.objects.filter(id=question_id, quiz=quiz)
+
+        qcount = question.count()
+        if qcount == 0:
+            continue
+        elif qcount == 1:
+            question = question.first()
+        else:
+            question = question.filter(quizquestion__order=q['order']).first()
+
+        question.type = q['question']['type']
+        question.title = clean_lang_dict(q['question']['title'])
+        question.save()
+
+        quiz_question, created = QuizQuestion.objects.update_or_create(
+            quiz=quiz, question=question, defaults={'order': q['order']})
+        q['id'] = quiz_question.pk
+        q['question']['id'] = question.pk
+
+        for prop in q['question']['props']:
+            if prop != 'id':
+                qprop, created = QuestionProps.objects.get_or_create(
+                    question=question, name=prop)
+                qprop.value = q['question']['props'][prop]
+                qprop.save()
+
+
+def validate_course_status(course, request):
+    """
+    When uploading an existing course:
+      - If the course status is LIVE, upload the course and update status from the request.
+      - If the course status is different than LIVE, only upload the course if the status matches the status from the
+        request.
+    """
+    result = True
+    error_msg = ""
+
+    if (course.status in [CourseStatus.DRAFT,
+                          CourseStatus.ARCHIVED,
+                          CourseStatus.NEW_DOWNLOADS_DISABLED,
+                          CourseStatus.READ_ONLY]
+            and course.status != request.POST['status']):
+        error_msg = f"This course currently has {course.status} status, so cannot now be updated."
+        messages.info(request, error_msg)
+        result = False
+
+    return result, error_msg
